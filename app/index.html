@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Card Scanner</title>
+<meta name="description" content="Scanne tes cartes Yu-Gi-Oh au téléphone et exporte un CSV pour Cardmarket.">
+<meta name="theme-color" content="#0f121a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Card Scanner">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <!-- ===== Scanner view ===== -->
+  <section id="view-scan" class="view">
+    <div class="stage" id="stage">
+      <video id="video" playsinline muted autoplay></video>
+      <div class="guide" id="guide" aria-hidden="true">
+        <div class="codezone"></div>
+        <span class="guide-hint">Code de set ici</span>
+      </div>
+      <div class="status" id="status" role="status">Appuie sur « Démarrer » pour lancer la caméra</div>
+      <div class="stage-actions">
+        <button id="startBtn" class="btn primary">Démarrer</button>
+        <label class="btn ghost" title="Analyser une photo">Photo
+          <input type="file" id="photoInput" accept="image/*" hidden>
+        </label>
+      </div>
+    </div>
+
+    <div class="last" id="last" hidden></div>
+
+    <form class="manual" id="manualForm" autocomplete="off">
+      <input id="manualCode" class="mono" placeholder="Taper un code : MP20-FR167" aria-label="Code de set">
+      <button class="btn" type="submit">Ajouter</button>
+    </form>
+  </section>
+
+  <!-- ===== List view ===== -->
+  <section id="view-list" class="view" hidden>
+    <header class="list-head">
+      <div>
+        <h1>Ma liste</h1>
+        <p class="muted" id="totals">0 carte</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn primary" id="exportBtn">Exporter CSV</button>
+      </div>
+    </header>
+    <p class="muted small" id="exportNote"></p>
+    <div class="filters">
+      <button class="chip on" data-filter="all">Tout</button>
+      <button class="chip" data-filter="todo">À vérifier</button>
+    </div>
+    <div id="list" class="list"></div>
+    <p class="empty" id="empty">Aucune carte pour l'instant. Passe sur « Scanner » et présente une carte dans le cadre.</p>
+
+    <details class="settings">
+      <summary>Réglages</summary>
+      <div class="grid">
+        <label>État par défaut
+          <select id="setCond"><option>MT</option><option selected>NM</option><option>EX</option><option>GD</option><option>LP</option><option>PL</option><option>PO</option></select>
+        </label>
+        <label>Langue si code sans langue
+          <select id="setLang"><option>French</option><option>English</option><option>German</option><option>Italian</option><option>Spanish</option><option>Portuguese</option></select>
+        </label>
+        <label>Commentaire par défaut
+          <input id="setComment" placeholder="ex. CM40-01">
+        </label>
+        <label class="check"><input type="checkbox" id="setPriceTrend"> Prix de vente = cote tendance</label>
+        <label class="check"><input type="checkbox" id="setSound" checked> Bip à chaque carte</label>
+      </div>
+      <p class="muted small" id="dataInfo"></p>
+      <button class="btn danger" id="clearBtn">Vider la liste</button>
+    </details>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button class="tab on" data-view="scan">Scanner</button>
+  <button class="tab" data-view="list">Liste <span id="tabCount" class="badge">0</span></button>
+</nav>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="vendor/tesseract/tesseract.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
