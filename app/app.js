@@ -1,5 +1,5 @@
-/* Card Scanner — reconnaissance du code de set dans le navigateur (Tesseract), sans serveur. */
-const APP_VERSION = "3";
+/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "4";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -139,71 +139,107 @@ function matchManual(raw) {
   return matchAll(s)[0] || null;
 }
 
-/* ================= OCR ================= */
-const WL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
-let workerP = null, ocrMode = "";
-function getWorker() {
-  if (!workerP) {
-    const base = new URL("vendor/tesseract/", location.href).href;
-    workerP = Tesseract.createWorker("eng", 1, { workerPath: base + "worker.min.js", corePath: base, langPath: base, workerBlobURL: false })
-      .catch((e) => { workerP = null; throw e; });
+/* ================= OCR (PaddleOCR via ONNX Runtime, on the phone) ================= */
+let engineP = null;
+function getEngine() {
+  if (!engineP) {
+    engineP = (async () => {
+      ort.env.wasm.wasmPaths = new URL("vendor/ort/", location.href).href;
+      ort.env.wasm.numThreads = 1;
+      const opt = { executionProviders: ["wasm"], graphOptimizationLevel: "all" };
+      const [det, rec, keysTxt] = await Promise.all([
+        ort.InferenceSession.create("vendor/paddle/det.onnx", opt),
+        ort.InferenceSession.create("vendor/paddle/rec.onnx", opt),
+        fetch("vendor/paddle/keys.txt").then((r) => r.text()),
+      ]);
+      const keys = keysTxt.split(/\r?\n/); if (keys.at(-1) === "") keys.pop(); keys.push(" ");
+      return { det, rec, keys };
+    })().catch((e) => { engineP = null; throw e; });
   }
-  return workerP;
+  return engineP;
 }
-async function ocr(canvas, mode) {
-  const w = await getWorker();
-  if (mode !== ocrMode) {
-    const p = mode === "band" ? { tessedit_char_whitelist: WL, tessedit_pageseg_mode: "6" }
-      : mode === "sparse" ? { tessedit_char_whitelist: WL, tessedit_pageseg_mode: "11" }
-      : { tessedit_char_whitelist: "", tessedit_pageseg_mode: "6" };
-    await w.setParameters(p); ocrMode = mode;
-  }
-  const { data } = await w.recognize(canvas);
-  return data.text || "";
-}
-/** Crop a region, upscale, grayscale and stretch contrast. */
-function prep(src, sx, sy, sw, sh, { targetH = 300, invert = false, binarize = false, maxW = 2200 } = {}) {
-  let scale = Math.min(Math.max(targetH / sh, 1), 4);
-  if (sw * scale > maxW) scale = maxW / sw;
+/** Copy a region of an image/video into a canvas, scaled so its longest side is at most `max`. */
+function grab(src, x, y, w, h, max = 960) {
+  const s = Math.min(1, max / Math.max(w, h));
   const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(sw * scale)); c.height = Math.max(1, Math.round(sh * scale));
-  const g = c.getContext("2d", { willReadFrequently: true });
-  g.imageSmoothingQuality = "high";
-  g.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
-  const im = g.getImageData(0, 0, c.width, c.height), d = im.data, hist = new Uint32Array(256);
-  for (let i = 0; i < d.length; i += 4) { const y = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0; d[i] = y; hist[y]++; }
-  const n = d.length / 4; let acc = 0, lo = 0, hi = 255;
-  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.02) { lo = v; break; } }
-  acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= n * 0.02) { hi = v; break; } }
-  const k = 255 / Math.max(1, hi - lo);
-  const h2 = new Uint32Array(256);
-  for (let i = 0; i < d.length; i += 4) { let v = (d[i] - lo) * k; v = v < 0 ? 0 : v > 255 ? 255 : v | 0; if (invert) v = 255 - v; d[i] = d[i + 1] = d[i + 2] = v; h2[v]++; }
-  if (binarize) {
-    // Otsu threshold: pure black text on white, helps with glare and textured card frames.
-    let sum = 0; for (let v = 0; v < 256; v++) sum += v * h2[v];
-    let sB = 0, wB = 0, best = 0, th = 128;
-    for (let v = 0; v < 256; v++) {
-      wB += h2[v]; if (!wB) continue; const wF = n - wB; if (!wF) break;
-      sB += v * h2[v]; const mB = sB / wB, mF = (sum - sB) / wF, between = wB * wF * (mB - mF) ** 2;
-      if (between > best) { best = between; th = v; }
-    }
-    for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = d[i] > th ? 255 : 0;
-  }
-  g.putImageData(im, 0, 0);
+  c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+  const g = c.getContext("2d", { willReadFrequently: true }); g.imageSmoothingQuality = "high";
+  g.drawImage(src, x, y, w, h, 0, 0, c.width, c.height);
   return c;
+}
+/** Text detection (DBNet): boxes of text in canvas `c`, in its pixel coordinates. */
+async function detectText(c) {
+  const { det } = await getEngine();
+  const W = Math.max(32, Math.round(c.width / 32) * 32), H = Math.max(32, Math.round(c.height / 32) * 32);
+  const t = document.createElement("canvas"); t.width = W; t.height = H;
+  const g = t.getContext("2d", { willReadFrequently: true }); g.drawImage(c, 0, 0, W, H);
+  const d = g.getImageData(0, 0, W, H).data, n = W * H, f = new Float32Array(3 * n);
+  const mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225];
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) f[k * n + i] = (d[i * 4 + k] / 255 - mean[k]) / std[k];
+  const out = await det.run({ [det.inputNames[0]]: new ort.Tensor("float32", f, [1, 3, H, W]) });
+  const p = out[det.outputNames[0]].data;
+  // connected components of the probability map
+  const seen = new Uint8Array(n), boxes = [], stack = [];
+  for (let i = 0; i < n; i++) {
+    if (seen[i] || p[i] < 0.3) continue;
+    let x0 = W, y0 = H, x1 = 0, y1 = 0, cnt = 0, sum = 0;
+    stack.push(i); seen[i] = 1;
+    while (stack.length) {
+      const j = stack.pop(), x = j % W, y = (j / W) | 0;
+      cnt++; sum += p[j]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (const k of [j - 1, j + 1, j - W, j + W]) {
+        if (k < 0 || k >= n || seen[k] || p[k] < 0.3) continue;
+        if ((k === j - 1 && x === 0) || (k === j + 1 && x === W - 1)) continue;
+        seen[k] = 1; stack.push(k);
+      }
+    }
+    if (cnt < 12 || sum / cnt < 0.5) continue;
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1, off = (bw * bh * 1.5) / (2 * (bw + bh)); // DB "unclip"
+    const sx = c.width / W, sy = c.height / H;
+    const bx = Math.max(0, x0 - off) * sx, by = Math.max(0, y0 - off) * sy;
+    boxes.push({ x: bx, y: by, w: Math.min(c.width, (x1 + off + 1) * sx) - bx, h: Math.min(c.height, (y1 + off + 1) * sy) - by });
+  }
+  return boxes;
+}
+/** Text recognition (CRNN + CTC) of one box of canvas `c`. */
+async function recognize(c, b) {
+  const { rec, keys } = await getEngine();
+  const H = 48, W = Math.min(960, Math.max(48, Math.round(b.w * H / b.h)));
+  const t = document.createElement("canvas"); t.width = W; t.height = H;
+  const g = t.getContext("2d", { willReadFrequently: true }); g.imageSmoothingQuality = "high";
+  g.drawImage(c, b.x, b.y, b.w, b.h, 0, 0, W, H);
+  const d = g.getImageData(0, 0, W, H).data, n = W * H, f = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) f[k * n + i] = d[i * 4 + k] / 127.5 - 1;
+  const out = await rec.run({ [rec.inputNames[0]]: new ort.Tensor("float32", f, [1, 3, H, W]) });
+  const o = out[rec.outputNames[0]], [, T, C] = o.dims;
+  let s = "", prev = 0;
+  for (let i = 0; i < T; i++) {
+    let bi = 0, bv = -1; for (let k = 0; k < C; k++) { const v = o.data[i * C + k]; if (v > bv) { bv = v; bi = k; } }
+    if (bi !== 0 && bi !== prev) s += keys[bi - 1] ?? "";
+    prev = bi;
+  }
+  return s;
+}
+/** All set codes found in canvas `c` (detection + recognition of every likely line). */
+async function readCodes(c, { textH = 0, maxLines = 8, prefer = null } = {}) {
+  let boxes = (await detectText(c)).filter((b) => b.w > b.h * 2);
+  // detected boxes are padded ("unclip"): about 2.5× the height of the letters
+  if (textH) boxes = boxes.filter((b) => b.h > textH * 0.6 && b.h < textH * 4.5);
+  if (prefer) boxes.sort((a, b) => prefer(a) - prefer(b));
+  const lines = [];
+  for (const b of boxes.slice(0, maxLines)) {
+    const text = await recognize(c, b);
+    const matches = matchAll(text.toUpperCase());
+    lines.push({ box: b, text, matches });
+    if (matches.some((m) => !m.unsure) && prefer) break;
+  }
+  return { boxes, lines, matches: lines.flatMap((l) => l.matches) };
 }
 
 /* ================= camera scanning ================= */
 const video = $("video");
 let stream = null, scanning = false, wantScan = false, audioCtx = null, wakeLock = null;
-let reads = [], last = null /* {sig} */, changed = true, changedHits = 0, frameNo = 0;
-// Each frame tries a slightly different reading so a badly placed or shiny card still gets read.
-const MODES = [
-  { zone: "code" }, { zone: "code", binarize: true }, { zone: "code", dy: -0.045 }, { zone: "code", dy: 0.045, binarize: true },
-  { zone: "code" }, { zone: "code", invert: true }, { zone: "code", dy: -0.045, binarize: true }, { zone: "pend" },
-];
-// Zones relative to the guide (card) rectangle.
-const ZONES = { code: [0.36, 0.655, 0.64, 0.155], pend: [0.0, 0.885, 0.62, 0.115], edition: [0.0, 0.9, 0.6, 0.1] };
+let reads = [], last = null /* {sig} */, changed = true, changedHits = 0;
 
 function guideInVideo() {
   const st = $("stage").getBoundingClientRect(), gr = $("guide").getBoundingClientRect();
@@ -212,7 +248,6 @@ function guideInVideo() {
   const ox = (st.width - vw * s) / 2, oy = (st.height - vh * s) / 2;
   return { x: (gr.left - st.left - ox) / s, y: (gr.top - st.top - oy) / s, w: gr.width / s, h: gr.height / s };
 }
-function zoneRect(r, z) { const [x, y, w, h] = ZONES[z]; return [r.x + r.w * x, r.y + r.h * y, r.w * w, r.h * h]; }
 const sigCanvas = document.createElement("canvas"); sigCanvas.width = 24; sigCanvas.height = 35;
 function signature(r) {
   const g = sigCanvas.getContext("2d", { willReadFrequently: true });
@@ -232,16 +267,22 @@ async function startCamera() {
     video.srcObject = stream; await video.play();
     try { const tr = stream.getVideoTracks()[0]; const caps = tr.getCapabilities?.() || {}; if (caps.focusMode?.includes("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch {}
     try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
-    setStatus("Préparation de la lecture…");
-    await getWorker();
-    scanning = wantScan = true; reads = []; changed = true;
-    $("startBtn").textContent = "Pause";
-    setStatus("Place une carte dans le cadre, code de set dans la zone pointillée");
-    loop();
   } catch (e) {
     stopCamera(false);
     setStatus(e && e.name === "NotAllowedError" ? "Accès à la caméra refusé. Autorise-le dans Réglages › Safari › Caméra." : "Caméra indisponible sur cet appareil. Utilise « Photo » ou tape le code.");
+    return;
   }
+  try {
+    setStatus("Chargement du moteur de lecture (une seule fois)…");
+    await getEngine();
+  } catch (e) {
+    console.warn(e); stopCamera(false);
+    setStatus("Le moteur de lecture n'a pas pu démarrer. Vérifie ta connexion puis réessaie."); return;
+  }
+  scanning = wantScan = true; reads = []; changed = true;
+  $("startBtn").textContent = "Pause";
+  setStatus("Place une carte dans le cadre, code de set dans la zone pointillée");
+  loop();
 }
 function stopCamera(keepWanted = false) {
   scanning = false; if (!keepWanted) wantScan = false;
@@ -256,6 +297,9 @@ async function loop() {
     await sleep(30);
   }
 }
+// The lower part of the card holds the set code (right, under the artwork; bottom-left on Pendulum
+// cards) and the "1st Edition" mention. Reading this whole area tolerates a badly placed card.
+const LOWER = { y: 0.56, h: 0.46, x: -0.04, w: 1.08 };
 async function scanFrame() {
   if (!video.videoWidth) { await sleep(100); return; }
   const r = guideInVideo();
@@ -264,40 +308,43 @@ async function scanFrame() {
     if (sigDiff(sig, last.sig) > 22) { if (++changedHits >= 2) { changed = true; reads = []; } }
     else changedHits = 0;
   }
-  const mode = MODES[frameNo++ % MODES.length];
-  const [x, y0, w, h] = zoneRect(r, mode.zone);
-  const y = Math.max(0, y0 + (mode.dy || 0) * r.h);
-  const crop = prep(video, x, y, w, h, mode);
-  const text = await ocr(crop, "band");
+  const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
+  const zw = Math.min(video.videoWidth - zx, r.w * LOWER.w), zh = Math.min(video.videoHeight - zy, r.h * LOWER.h);
+  const zone = grab(video, zx, zy, zw, zh, 960);
+  const k = zone.height / zh, textH = r.h * 0.017 * k;
+  // try first the line under the artwork on the right, then the rest
+  const prefer = (b) => Math.abs((b.y + b.h / 2) / zone.height - 0.3) + (b.x + b.w > zone.width * 0.7 ? 0 : 0.3);
+  const res = await readCodes(zone, { textH, prefer, maxLines: 5 });
   if (!scanning) return;
-  const all = matchAll(text);
-  if (settings.debug) showDebug(crop, text, all, mode, r);
-  const m = all.find((x) => !x.unsure) || null;
+  if (settings.debug) showDebug(zone, res, r);
+  const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
-  if (!m) { if (!changed) setStatus("Retire la carte et présente la suivante"); else setStatus("Recherche du code…"); return; }
+  if (!m) { setStatus(changed ? "Recherche du code…" : "Retire la carte et présente la suivante"); return; }
   if (!changed) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); return; }
   const hits = reads.filter((k) => k === m.key).length;
   setStatus(`Lu : <span class="code">${esc(m.code)}</span> (${hits}/2)`);
   if (hits >= 2) {
-    const firstEd = await detectEdition(r);
-    const it = makeItem(m, { firstEd });
-    commit(it, "scan");
+    const firstEd = await detectEdition(zone, res.boxes, textH);
+    commit(makeItem(m, { firstEd }), "scan");
     last = { sig }; changed = false; changedHits = 0; reads = [];
     flash(); beep();
   }
 }
-async function detectEdition(r) {
+async function detectEdition(zone, boxes, textH) {
   try {
-    const [x, y, w, h] = zoneRect(r, "edition");
-    const t = await ocr(prep(video, x, y, w, h, { targetH: 120 }), "text");
-    return /EDI[TC]|DITION|AUFLAGE|EDIZ|1ST|1RE|1\.?\s?A/i.test(t);
-  } catch { return false; }
+    const cands = boxes.filter((b) => b.y > zone.height * 0.7 && b.x < zone.width * 0.5 && b.h < textH * 4.5)
+      .sort((a, b) => b.y - a.y).slice(0, 3);
+    for (const b of cands) if (/EDI[TC]|DITION|AUFLAGE|EDIZ|1ST|1RE|1\.?\s?A/i.test(await recognize(zone, b))) return true;
+  } catch {}
+  return false;
 }
-function showDebug(crop, text, matches, mode, r) {
-  const c = $("debugCanvas"); c.width = crop.width; c.height = crop.height;
-  c.getContext("2d").drawImage(crop, 0, 0);
-  const opts = [mode.zone, mode.binarize && "seuillage", mode.invert && "inversé", mode.dy && `décalage ${mode.dy > 0 ? "+" : ""}${mode.dy}`].filter(Boolean).join(", ");
-  $("debugText").textContent = `Texte lu : ${text.trim().replace(/\n+/g, " ⏎ ") || "(rien)"}\nCode(s) reconnu(s) : ${matches.map((m) => m.code + (m.unsure ? " (incertain)" : "")).join(", ") || "aucun"}\nRéglage : ${opts}\nVidéo ${video.videoWidth}×${video.videoHeight} · carte ${Math.round(r.w)}×${Math.round(r.h)} px`;
+function showDebug(zone, res, r) {
+  const c = $("debugCanvas"); c.width = zone.width; c.height = zone.height;
+  const g = c.getContext("2d"); g.drawImage(zone, 0, 0);
+  g.lineWidth = 3;
+  for (const b of res.boxes) { g.strokeStyle = "rgba(240,162,74,.9)"; g.strokeRect(b.x, b.y, b.w, b.h); }
+  for (const l of res.lines) { g.strokeStyle = l.matches.length ? "#55c993" : "#3b82f6"; g.strokeRect(l.box.x, l.box.y, l.box.w, l.box.h); }
+  $("debugText").textContent = `Lignes lues : ${res.lines.map((l) => l.text || "∅").join(" ⏎ ") || "(aucune)"}\nCode(s) reconnu(s) : ${res.matches.map((m) => m.code + (m.unsure ? " (incertain)" : "")).join(", ") || "aucun"}\nVidéo ${video.videoWidth}×${video.videoHeight} · carte ${Math.round(r.w)}×${Math.round(r.h)} px · ${res.boxes.length} zone(s) de texte`;
   $("debug").hidden = false;
 }
 function flash() { const g = $("guide"); g.classList.add("hit"); setTimeout(() => g.classList.remove("hit"), 700); }
@@ -322,8 +369,8 @@ async function scanPhoto(file) {
     const found = [];
     for (const rot of [0, 90, 270]) {
       const src = rotate(bmp, rot);
-      const t = await ocr(prep(src, 0, 0, src.width, src.height, { targetH: src.height, maxW: 2400 }), "sparse");
-      for (const m of matchAll(t)) if (!found.some((f) => f.key === m.key)) found.push(m);
+      const res = await readCodes(src, { maxLines: 40 });
+      for (const m of res.matches) if (!m.unsure && !found.some((f) => f.key === m.key)) found.push(m);
       if (found.length) break;
     }
     if (!found.length) { setStatus("Aucun code lu sur cette photo. Rapproche-toi du code de set."); toast("Aucun code trouvé"); return; }
@@ -332,7 +379,7 @@ async function scanPhoto(file) {
   } catch (e) { console.warn(e); setStatus("Cette photo n'a pas pu être analysée."); }
 }
 function rotate(bmp, deg) {
-  const scale = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+  const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
   const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
   const c = document.createElement("canvas"); const g = c.getContext("2d");
   if (deg % 180) { c.width = h; c.height = w; } else { c.width = w; c.height = h; }
@@ -524,6 +571,6 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = fals
 bindSettings(); renderList(); renderLast(); loadData();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
-  matchAll, matchManual, buildCsv, ocr, prep, get DATA() { return DATA; },
-  async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getWorker(); scanning = wantScan = true; reads = []; changed = true; loop(); },
+  matchAll, matchManual, buildCsv, grab, detectText, recognize, readCodes, get DATA() { return DATA; },
+  async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getEngine(); scanning = wantScan = true; reads = []; changed = true; loop(); },
 };

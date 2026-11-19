@@ -1,7 +1,7 @@
-# Card Scanner
+﻿# Card Scanner
 
 Site web mobile pour scanner des cartes Yu-Gi-Oh une par une et exporter un CSV importable sur Cardmarket.
-Il fonctionne sans serveur et sans IA : le code de set est lu sur le téléphone (Tesseract), puis comparé
+Il fonctionne sans serveur et sans IA : le code de set est lu sur le téléphone (PaddleOCR via ONNX Runtime), puis comparé
 aux codes qui existent vraiment (base YGOPRODeck). Les cotes viennent du guide des prix public de Cardmarket.
 
 ## Contenu
@@ -9,7 +9,7 @@ aux codes qui existent vraiment (base YGOPRODeck). Les cotes viennent du guide d
 | Dossier / fichier | Rôle |
 |---|---|
 | `app/` | Le site publié (page, scanner, liste, export, mode hors ligne) |
-| `app/vendor/tesseract/` | Moteur de lecture de texte, embarqué pour marcher hors ligne |
+| `app/vendor/paddle/`, `app/vendor/ort/` | Moteur de lecture de texte (PaddleOCR + ONNX Runtime), embarqué pour marcher hors ligne |
 | `tools/build_data.py` | Construit `app/data/cards.json` (cartes, codes, identifiants et cotes Cardmarket) |
 | `tools/make_icons.py` | Dessine les icônes de l'appli |
 | `.github/workflows/deploy.yml` | Chaque nuit : reconstruit les données et republie le site sur GitHub Pages |
@@ -40,3 +40,4 @@ python tools/build_data.py
 python -m http.server 8766 --directory app
 ```
 Puis ouvrir http://localhost:8766 (la caméra marche sur `localhost`).
+
