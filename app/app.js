@@ -16,7 +16,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
 let items = store.get("cs-items", []);
-const settings = Object.assign({ cond: "NM", lang: "French", comment: "", priceTrend: false, sound: true }, store.get("cs-settings", {}));
+const settings = Object.assign({ cond: "NM", lang: "French", comment: "", priceTrend: false, sound: true, debug: false }, store.get("cs-settings", {}));
 function saveItems() { if (!store.set("cs-items", items)) toast("Impossible d'enregistrer la liste sur ce téléphone. Exporte-la."); renderList(); }
 navigator.storage?.persist?.().catch(() => {});
 
@@ -161,7 +161,7 @@ async function ocr(canvas, mode) {
   return data.text || "";
 }
 /** Crop a region, upscale, grayscale and stretch contrast. */
-function prep(src, sx, sy, sw, sh, { targetH = 300, invert = false, maxW = 2200 } = {}) {
+function prep(src, sx, sy, sw, sh, { targetH = 300, invert = false, binarize = false, maxW = 2200 } = {}) {
   let scale = Math.min(Math.max(targetH / sh, 1), 4);
   if (sw * scale > maxW) scale = maxW / sw;
   const c = document.createElement("canvas");
@@ -175,7 +175,19 @@ function prep(src, sx, sy, sw, sh, { targetH = 300, invert = false, maxW = 2200 
   for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.02) { lo = v; break; } }
   acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= n * 0.02) { hi = v; break; } }
   const k = 255 / Math.max(1, hi - lo);
-  for (let i = 0; i < d.length; i += 4) { let v = (d[i] - lo) * k; v = v < 0 ? 0 : v > 255 ? 255 : v; if (invert) v = 255 - v; d[i] = d[i + 1] = d[i + 2] = v; }
+  const h2 = new Uint32Array(256);
+  for (let i = 0; i < d.length; i += 4) { let v = (d[i] - lo) * k; v = v < 0 ? 0 : v > 255 ? 255 : v | 0; if (invert) v = 255 - v; d[i] = d[i + 1] = d[i + 2] = v; h2[v]++; }
+  if (binarize) {
+    // Otsu threshold: pure black text on white, helps with glare and textured card frames.
+    let sum = 0; for (let v = 0; v < 256; v++) sum += v * h2[v];
+    let sB = 0, wB = 0, best = 0, th = 128;
+    for (let v = 0; v < 256; v++) {
+      wB += h2[v]; if (!wB) continue; const wF = n - wB; if (!wF) break;
+      sB += v * h2[v]; const mB = sB / wB, mF = (sum - sB) / wF, between = wB * wF * (mB - mF) ** 2;
+      if (between > best) { best = between; th = v; }
+    }
+    for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = d[i] > th ? 255 : 0;
+  }
   g.putImageData(im, 0, 0);
   return c;
 }
@@ -184,7 +196,11 @@ function prep(src, sx, sy, sw, sh, { targetH = 300, invert = false, maxW = 2200 
 const video = $("video");
 let stream = null, scanning = false, wantScan = false, audioCtx = null, wakeLock = null;
 let reads = [], last = null /* {sig} */, changed = true, changedHits = 0, frameNo = 0;
-const MODES = ["code", "code", "codeInv", "code", "code", "pend"];
+// Each frame tries a slightly different reading so a badly placed or shiny card still gets read.
+const MODES = [
+  { zone: "code" }, { zone: "code", binarize: true }, { zone: "code", dy: -0.045 }, { zone: "code", dy: 0.045, binarize: true },
+  { zone: "code" }, { zone: "code", invert: true }, { zone: "code", dy: -0.045, binarize: true }, { zone: "pend" },
+];
 // Zones relative to the guide (card) rectangle.
 const ZONES = { code: [0.36, 0.655, 0.64, 0.155], pend: [0.0, 0.885, 0.62, 0.115], edition: [0.0, 0.9, 0.6, 0.1] };
 
@@ -211,7 +227,7 @@ async function startCamera() {
   try {
     if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); }
     audioCtx?.resume?.();
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } } });
     video.srcObject = stream; await video.play();
     try { const tr = stream.getVideoTracks()[0]; const caps = tr.getCapabilities?.() || {}; if (caps.focusMode?.includes("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch {}
     try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
@@ -248,11 +264,14 @@ async function scanFrame() {
     else changedHits = 0;
   }
   const mode = MODES[frameNo++ % MODES.length];
-  const zone = mode === "pend" ? "pend" : "code";
-  const [x, y, w, h] = zoneRect(r, zone);
-  const text = await ocr(prep(video, x, y, w, h, { invert: mode === "codeInv" }), "band");
+  const [x, y0, w, h] = zoneRect(r, mode.zone);
+  const y = Math.max(0, y0 + (mode.dy || 0) * r.h);
+  const crop = prep(video, x, y, w, h, mode);
+  const text = await ocr(crop, "band");
   if (!scanning) return;
-  const m = matchAll(text).find((x) => !x.unsure) || null;
+  const all = matchAll(text);
+  if (settings.debug) showDebug(crop, text, all, mode, r);
+  const m = all.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
   if (!m) { if (!changed) setStatus("Retire la carte et présente la suivante"); else setStatus("Recherche du code…"); return; }
   if (!changed) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); return; }
@@ -272,6 +291,13 @@ async function detectEdition(r) {
     const t = await ocr(prep(video, x, y, w, h, { targetH: 120 }), "text");
     return /EDI[TC]|DITION|AUFLAGE|EDIZ|1ST|1RE|1\.?\s?A/i.test(t);
   } catch { return false; }
+}
+function showDebug(crop, text, matches, mode, r) {
+  const c = $("debugCanvas"); c.width = crop.width; c.height = crop.height;
+  c.getContext("2d").drawImage(crop, 0, 0);
+  const opts = [mode.zone, mode.binarize && "seuillage", mode.invert && "inversé", mode.dy && `décalage ${mode.dy > 0 ? "+" : ""}${mode.dy}`].filter(Boolean).join(", ");
+  $("debugText").textContent = `Texte lu : ${text.trim().replace(/\n+/g, " ⏎ ") || "(rien)"}\nCode(s) reconnu(s) : ${matches.map((m) => m.code + (m.unsure ? " (incertain)" : "")).join(", ") || "aucun"}\nRéglage : ${opts}\nVidéo ${video.videoWidth}×${video.videoHeight} · carte ${Math.round(r.w)}×${Math.round(r.h)} px`;
+  $("debug").hidden = false;
 }
 function flash() { const g = $("guide"); g.classList.add("hit"); setTimeout(() => g.classList.remove("hit"), 700); }
 function beep() {
@@ -457,12 +483,13 @@ $("exportBtn").addEventListener("click", async () => {
 /* ================= settings & navigation ================= */
 function bindSettings() {
   $("setCond").value = settings.cond; $("setLang").value = settings.lang; $("setComment").value = settings.comment;
-  $("setPriceTrend").checked = settings.priceTrend; $("setSound").checked = settings.sound;
+  $("setPriceTrend").checked = settings.priceTrend; $("setSound").checked = settings.sound; $("setDebug").checked = settings.debug;
   const save = () => {
-    Object.assign(settings, { cond: $("setCond").value, lang: $("setLang").value, comment: $("setComment").value.trim(), priceTrend: $("setPriceTrend").checked, sound: $("setSound").checked });
+    Object.assign(settings, { cond: $("setCond").value, lang: $("setLang").value, comment: $("setComment").value.trim(), priceTrend: $("setPriceTrend").checked, sound: $("setSound").checked, debug: $("setDebug").checked });
     store.set("cs-settings", settings);
+    if (!settings.debug) $("debug").hidden = true;
   };
-  ["setCond", "setLang", "setComment", "setPriceTrend", "setSound"].forEach((id) => $(id).addEventListener("change", save));
+  ["setCond", "setLang", "setComment", "setPriceTrend", "setSound", "setDebug"].forEach((id) => $(id).addEventListener("change", save));
 }
 let clearArmed = 0;
 $("clearBtn").addEventListener("click", () => {
@@ -495,4 +522,7 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = fals
 /* ================= boot ================= */
 bindSettings(); renderList(); renderLast(); loadData();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
-window.__cs = { matchAll, matchManual, buildCsv, ocr, prep, get DATA() { return DATA; } }; // debug helpers
+window.__cs = { // debug helpers
+  matchAll, matchManual, buildCsv, ocr, prep, get DATA() { return DATA; },
+  async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getWorker(); scanning = wantScan = true; reads = []; changed = true; loop(); },
+};

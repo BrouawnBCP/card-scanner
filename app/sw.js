@@ -1,6 +1,6 @@
 // Offline support: app files are served network-first (updates show up when online),
 // the OCR engine is cache-first (large and versioned), the card data network-first.
-const CACHE = "card-scanner-v1";
+const CACHE = "card-scanner-v2";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon-180.png", "icons/icon-192.png", "data/cards.json"];
 const VENDOR = ["vendor/tesseract/tesseract.min.js", "vendor/tesseract/worker.min.js", "vendor/tesseract/eng.traineddata.gz",
   "vendor/tesseract/tesseract-core-simd-lstm.wasm.js", "vendor/tesseract/tesseract-core-lstm.wasm.js"];

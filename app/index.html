@@ -34,6 +34,12 @@
       </div>
     </div>
 
+    <div class="debug" id="debug" hidden>
+      <div class="muted small">Ce que voit le scanner :</div>
+      <canvas id="debugCanvas"></canvas>
+      <pre id="debugText"></pre>
+    </div>
+
     <div class="last" id="last" hidden></div>
 
     <form class="manual" id="manualForm" autocomplete="off">
@@ -75,6 +81,7 @@
         </label>
         <label class="check"><input type="checkbox" id="setPriceTrend"> Prix de vente = cote tendance</label>
         <label class="check"><input type="checkbox" id="setSound" checked> Bip à chaque carte</label>
+        <label class="check"><input type="checkbox" id="setDebug"> Mode diagnostic (voir ce que lit le scanner)</label>
       </div>
       <p class="muted small" id="dataInfo"></p>
       <button class="btn danger" id="clearBtn">Vider la liste</button>
