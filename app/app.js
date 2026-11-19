@@ -1,4 +1,5 @@
 /* Card Scanner — reconnaissance du code de set dans le navigateur (Tesseract), sans serveur. */
+const APP_VERSION = "3";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -27,7 +28,7 @@ async function loadData() {
     const r = await fetch("data/cards.json");
     DATA = await r.json();
     PREFIXES = new Set(Object.keys(DATA.prints).map((k) => k.slice(0, k.indexOf("-"))));
-    $("dataInfo").textContent = `Base : ${DATA.cards.length.toLocaleString("fr-FR")} cartes · cotes Cardmarket du ${new Date(DATA.v).toLocaleDateString("fr-FR")}`;
+    $("dataInfo").textContent = `Version ${APP_VERSION} · Base : ${DATA.cards.length.toLocaleString("fr-FR")} cartes · cotes Cardmarket du ${new Date(DATA.v).toLocaleDateString("fr-FR")}`;
     renderList();
   } catch {
     setStatus("La base de cartes n'a pas pu être chargée. Vérifie ta connexion puis relance l'appli.");
@@ -521,7 +522,7 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = fals
 
 /* ================= boot ================= */
 bindSettings(); renderList(); renderLast(); loadData();
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
   matchAll, matchManual, buildCsv, ocr, prep, get DATA() { return DATA; },
   async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getWorker(); scanning = wantScan = true; reads = []; changed = true; loop(); },
