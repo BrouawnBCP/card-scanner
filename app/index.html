@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=28">
+<link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
 
@@ -36,6 +36,7 @@
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.6 1.5A3.5 3.5 0 0 1 17.5 18z"/></symbol>
   <!-- eBay wordmark (four colours), used as a link to eBay search -->
   <symbol id="logo-ebay" viewBox="0 0 60 24"><g font-family="Helvetica Neue,Helvetica,Arial,sans-serif" font-weight="700" font-size="22" letter-spacing="-1.6"><text x="1" y="18" fill="#e53238">e</text><text x="13.5" y="18" fill="#0064d2">b</text><text x="27" y="18" fill="#f5af02">a</text><text x="39.5" y="18" fill="#86b817">y</text></g></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></symbol>
   <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></symbol>
   <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/></symbol>
@@ -95,11 +96,16 @@
         <span class="tile-ico"><svg class="ico"><use href="#i-list"/></svg></span>
         <span class="tile-txt"><strong>Mes listes</strong><span id="homeListSub">0 session</span></span>
       </button>
-      <button class="tile" data-go="settings">
-        <span class="tile-ico"><svg class="ico"><use href="#i-gear"/></svg></span>
-        <span class="tile-txt"><strong>Réglages</strong><span>Compte, préférences</span></span>
+      <button class="tile" data-go="photos">
+        <span class="tile-ico"><svg class="ico"><use href="#i-camera"/></svg></span>
+        <span class="tile-txt"><strong>Mes photos</strong><span id="homePhotoSub">Pour tes annonces</span></span>
       </button>
     </div>
+    <button class="tile tile-row" data-go="settings">
+      <span class="tile-ico"><svg class="ico"><use href="#i-gear"/></svg></span>
+      <span class="tile-txt"><strong>Réglages</strong><span>Compte, préférences, stock Cardmarket</span></span>
+      <svg class="ico chev"><use href="#i-chev"/></svg>
+    </button>
 
     <div class="home-stats">
       <div class="stat"><span class="stat-v" id="homeCards">0</span><span class="stat-l">cartes au total</span></div>
@@ -121,6 +127,11 @@
       </button>
     </div>
 
+    <div class="segmented cam-mode" id="camMode" role="tablist" aria-label="Mode de la caméra">
+      <button class="seg on" data-cam="scan" type="button"><svg class="ico sm"><use href="#i-scan"/></svg> Scan continu</button>
+      <button class="seg" data-cam="photo" type="button"><svg class="ico sm"><use href="#i-camera"/></svg> Photo</button>
+    </div>
+
     <div class="stage" id="stage">
       <video id="video" playsinline muted autoplay></video>
       <div class="guide" id="guide" aria-hidden="true">
@@ -133,11 +144,17 @@
           <svg class="ico"><use href="#i-flash"/></svg>
         </button>
         <button id="startBtn" class="shutter" aria-label="Démarrer le scan"><span></span></button>
-        <label class="round-btn" aria-label="Analyser une photo" title="Analyser une photo">
+        <label class="round-btn" id="importPhotoBtn" aria-label="Analyser une photo" title="Analyser une photo">
           <svg class="ico"><use href="#i-image"/></svg>
           <input type="file" id="photoInput" accept="image/*" hidden>
         </label>
+        <button class="round-btn gallery-btn" id="galleryBtn" type="button" aria-label="Mes photos" title="Mes photos" hidden>
+          <img id="galleryThumb" alt="" hidden>
+          <svg class="ico" id="galleryIco"><use href="#i-image"/></svg>
+          <b class="badge" id="photoCount">0</b>
+        </button>
       </div>
+      <div class="snap" id="snap" aria-hidden="true"></div>
     </div>
 
     <div class="scan-hint" id="scanHint" role="status" aria-live="polite" hidden></div>
@@ -246,6 +263,28 @@
   </section>
 
   <!-- ===== Réglages ===== -->
+  <!-- ===== Mes photos ===== -->
+  <section id="view-photos" class="view" hidden>
+    <header class="list-head">
+      <h1 class="title-input static">Mes photos</h1>
+      <button class="btn small" id="photoSelectBtn" type="button"><svg class="ico sm"><use href="#i-check"/></svg> <span>Sélectionner</span></button>
+    </header>
+    <p class="muted small" id="photoInfo">Passe le Scanner en mode « Photo » pour photographier tes cartes.</p>
+    <div class="photo-grid" id="photoGrid"></div>
+    <div class="empty" id="photoEmpty">
+      <svg class="ico xl" aria-hidden="true"><use href="#i-camera"/></svg>
+      <p>Aucune photo pour l'instant.</p>
+      <p class="muted small">Scanner › « Photo », cadre la carte et appuie sur le déclencheur.</p>
+      <button class="btn primary" type="button" data-go-photo="1">Prendre des photos</button>
+    </div>
+    <div class="photo-actions" id="photoActions" hidden>
+      <strong id="photoSelCount">0 sélectionnée</strong>
+      <button class="btn small" type="button" data-pa="all">Tout</button>
+      <button class="btn primary small" type="button" data-pa="share"><svg class="ico sm"><use href="#i-share"/></svg> Partager</button>
+      <button class="btn small danger" type="button" data-pa="del"><svg class="ico sm"><use href="#i-trash"/></svg> <span>Supprimer</span></button>
+    </div>
+  </section>
+
   <section id="view-settings" class="view" hidden>
     <h1 class="page-title">Réglages</h1>
 
@@ -342,12 +381,28 @@
   </div>
 </div>
 
+<div class="viewer" id="viewer" hidden>
+  <div class="viewer-top">
+    <button class="icon-btn" type="button" data-v="close" aria-label="Fermer"><svg class="ico"><use href="#i-plus"/></svg></button>
+    <span class="viewer-pos" id="viewerPos"></span>
+    <span></span>
+  </div>
+  <div class="viewer-img"><img id="viewerImg" alt=""></div>
+  <div class="viewer-info" id="viewerInfo"></div>
+  <div class="viewer-bar">
+    <button class="icon-btn" type="button" data-v="prev" aria-label="Photo précédente"><svg class="ico"><use href="#i-chev"/></svg></button>
+    <button class="btn primary" type="button" data-v="share"><svg class="ico sm"><use href="#i-share"/></svg> Partager / enregistrer</button>
+    <button class="icon-btn del-ico" type="button" data-v="del" aria-label="Supprimer"><svg class="ico"><use href="#i-trash"/></svg></button>
+    <button class="icon-btn" type="button" data-v="next" aria-label="Photo suivante"><svg class="ico"><use href="#i-chev"/></svg></button>
+  </div>
+</div>
+
 <div class="splash" id="splash"><img src="icons/icon-192.png" alt="" width="64" height="64"></div>
 
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=28"></script>
+<script type="module" src="app.js?v=29"></script>
 </body>
 </html>

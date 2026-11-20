@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "28";
+const APP_VERSION = "29";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -30,13 +30,20 @@ const idb = {
   db: null,
   open() {
     return (this.db ||= new Promise((res, rej) => {
-      const r = indexedDB.open("card-scanner", 1);
-      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      const r = indexedDB.open("card-scanner", 2);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+        if (!db.objectStoreNames.contains("photos")) db.createObjectStore("photos", { keyPath: "id" }); // card photos (v29)
+      };
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     }));
   },
   async get(k) { const db = await this.open(); return new Promise((res, rej) => { const q = db.transaction("kv").objectStore("kv").get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); },
   async set(k, v) { const db = await this.open(); return new Promise((res, rej) => { const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); }); },
+  async photos() { const db = await this.open(); return new Promise((res, rej) => { const q = db.transaction("photos").objectStore("photos").getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => rej(q.error); }); },
+  async putPhoto(p) { const db = await this.open(); return new Promise((res, rej) => { const tx = db.transaction("photos", "readwrite"); tx.objectStore("photos").put(p); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); }); },
+  async delPhoto(id) { const db = await this.open(); return new Promise((res, rej) => { const tx = db.transaction("photos", "readwrite"); tx.objectStore("photos").delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); },
 };
 let sessions = store.get("cs-sessions", null);
 if (!Array.isArray(sessions) || !sessions.length) sessions = [newSession(store.get("cs-items", []))]; // migrate the single list of v1–v4
@@ -376,7 +383,9 @@ async function startCamera() {
   }
   starting = false;
   if (view && view !== "scan") { pauseScan(); return; } // the person left while the camera was starting
-  scanning = wantScan = true; reads = []; changed = true;
+  wantScan = true;
+  if (camMode === "photo") { enterPhotoMode(); return; } // camera on, no automatic reading
+  scanning = true; reads = []; changed = true;
   setShutter(true);
   setStatus("Place une carte dans le cadre");
   loop();
@@ -1409,7 +1418,7 @@ $("clearBtn").addEventListener("click", () => {
   clearArmed = 0; deleteSession(current); $("clearBtn").innerHTML = idle; toast("Session supprimée");
 });
 /* ----- pages: auth → home → scanner / lists / settings ----- */
-const VIEWS = ["auth", "home", "scan", "list", "settings"];
+const VIEWS = ["auth", "home", "scan", "list", "settings", "photos"];
 let view = null;
 function showView(v) {
   view = v;
@@ -1417,7 +1426,8 @@ function showView(v) {
   $("tabs").hidden = v === "auth";
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.view === v));
   window.scrollTo(0, 0);
-  if (v !== "scan" && scanning) pauseScan();
+  if (v !== "scan" && (scanning || (camMode === "photo" && liveTrack()))) pauseScan();
+  if (v === "photos") renderPhotos();
   if (v === "scan" && wantScan && !scanning) startCamera();
   if (v === "home") renderHome();
 }
@@ -1443,7 +1453,169 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && (scanning || stream)) stopCamera(true); // app in the background: release the camera
   else if (!document.hidden && wantScan && !scanning && !$("view-scan").hidden) startCamera();
 });
-$("startBtn").addEventListener("click", () => scanning ? stopCamera() : startCamera());
+$("startBtn").addEventListener("click", () => {
+  if (camMode === "photo") return liveTrack() && !starting && video.videoWidth ? takePhoto() : startCamera();
+  scanning ? stopCamera() : startCamera();
+});
+
+/* ================= photo mode: pictures of cards for listings ================= */
+let camMode = settings.camMode === "photo" ? "photo" : "scan";
+function renderCamMode() {
+  $("camMode").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b.dataset.cam === camMode));
+  $("stage").classList.toggle("photo-mode", camMode === "photo");
+  $("importPhotoBtn").hidden = camMode === "photo";
+  $("galleryBtn").hidden = camMode !== "photo";
+}
+function enterPhotoMode() {
+  scanning = false; loopToken++; showHint(null); failStreak = 0;
+  setShutter(false);
+  $("startBtn").setAttribute("aria-label", "Prendre une photo");
+  setStatus("Mode photo : cadre la carte puis appuie sur le déclencheur");
+  if (!liveTrack()) setStatus("Mode photo : appuie sur le déclencheur pour lancer la caméra");
+}
+$("camMode").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-cam]"); if (!b || b.dataset.cam === camMode) return;
+  camMode = b.dataset.cam; settings.camMode = camMode; store.set("cs-settings", settings);
+  renderCamMode();
+  if (camMode === "photo") enterPhotoMode();
+  else if (liveTrack() && video.videoWidth) { scanning = wantScan = true; reads = []; changed = true; setShutter(true); setStatus("Place une carte dans le cadre"); loop(); }
+  else { setShutter(false); setStatus("Appuie sur le bouton pour lancer la caméra"); }
+});
+let photoCache = null; // [{id, createdAt, thumb, blob, w, h, code, name, key}]
+async function loadPhotos() {
+  try { photoCache = (await idb.photos()).sort((a, b) => b.createdAt - a.createdAt); } catch (e) { console.warn(e); photoCache = []; }
+  updatePhotoBadge();
+}
+const objUrls = new Map();
+const blobUrl = (p, which = "thumb") => { const k = p.id + which; if (!objUrls.has(k)) objUrls.set(k, URL.createObjectURL(p[which])); return objUrls.get(k); };
+function dropUrls(id) { for (const w of ["thumb", "blob"]) { const k = id + w; if (objUrls.has(k)) { URL.revokeObjectURL(objUrls.get(k)); objUrls.delete(k); } } }
+function updatePhotoBadge() {
+  const n = photoCache?.length || 0;
+  $("photoCount").textContent = n; $("photoCount").classList.toggle("zero", !n);
+  const latest = photoCache?.[0];
+  $("galleryThumb").hidden = !latest; $("galleryIco").style.display = latest ? "none" : ""; // (svg has no "hidden" property)
+  if (latest) $("galleryThumb").src = blobUrl(latest);
+  $("homePhotoSub").textContent = n ? `${n} photo${n > 1 ? "s" : ""}` : "Pour tes annonces";
+}
+const toBlob = (c, q = 0.92) => new Promise((res) => c.toBlob(res, "image/jpeg", q));
+/** Take a picture of the card in the frame (with a small margin), full camera resolution. */
+async function takePhoto() {
+  const r = guideInVideo(), m = 0.05;
+  const x = Math.max(0, r.x - r.w * m), y = Math.max(0, r.y - r.h * m);
+  const w = Math.min(video.videoWidth - x, r.w * (1 + 2 * m)), h = Math.min(video.videoHeight - y, r.h * (1 + 2 * m));
+  const full = grab(video, x, y, w, h, 2400);
+  const thumbC = grab(full, 0, 0, full.width, full.height, 360);
+  // shutter flash, driven by timers so it never stays white
+  const snap = $("snap"); snap.style.transition = "none"; snap.style.opacity = "0.85";
+  setTimeout(() => { snap.style.transition = "opacity .3s ease-out"; snap.style.opacity = "0"; }, 60);
+  setTimeout(() => { snap.style.transition = "none"; snap.style.opacity = "0"; }, 450);
+  beep();
+  const p = { id: uid(), createdAt: Date.now(), w: full.width, h: full.height, blob: await toBlob(full, 0.92), thumb: await toBlob(thumbC, 0.8), code: "", name: "", key: "" };
+  try { await idb.putPhoto(p); } catch (e) { console.warn(e); toast("Impossible d'enregistrer la photo (mémoire du téléphone pleine ?)"); return; }
+  photoCache = [p, ...(photoCache || [])]; updatePhotoBadge(); bump($("galleryBtn"));
+  setStatus("Photo enregistrée — recherche du code de la carte…");
+  // Name the photo after the card: read the set code on the lower part of the picture.
+  try {
+    const zone = grab(full, 0, full.height * 0.5, full.width, full.height * 0.5, 960);
+    const res = await readCodes(zone, { maxLines: 8, prefer: (b) => (b.w / zone.width > 0.5 ? 1 : 0) });
+    const mm = res.matches.find((z) => !z.unsure) || res.matches[0];
+    if (mm) {
+      const c = candidatesFor(mm.key)[0];
+      p.code = mm.code; p.key = mm.key; p.name = c ? (DATA.cards[c.card][1] || DATA.cards[c.card][0]) : "";
+      await idb.putPhoto(p);
+      setStatus(`Photo enregistrée : <span class="code">${esc(p.code)}</span> ${esc(p.name)}`);
+    } else setStatus("Photo enregistrée (code non lu)");
+  } catch (e) { console.warn(e); setStatus("Photo enregistrée"); }
+  if (view === "photos") renderPhotos();
+}
+$("galleryBtn").addEventListener("click", () => showView("photos"));
+
+/* ----- "Mes photos" ----- */
+let photoSelecting = false; const photoSel = new Set(); let viewerIdx = -1;
+async function renderPhotos() {
+  if (!photoCache) await loadPhotos();
+  const ps = photoCache;
+  $("photoEmpty").hidden = ps.length > 0;
+  $("photoInfo").textContent = ps.length ? `${ps.length} photo${ps.length > 1 ? "s" : ""} · enregistrées sur ce téléphone (non synchronisées). Touche une photo pour l'ouvrir, la partager ou l'enregistrer dans ta galerie.` : "";
+  $("photoSelectBtn").hidden = !ps.length;
+  $("photoSelectBtn").querySelector("span").textContent = photoSelecting ? "Terminer" : "Sélectionner";
+  $("view-photos").classList.toggle("selecting", photoSelecting);
+  $("photoActions").hidden = !photoSelecting;
+  $("photoSelCount").textContent = `${photoSel.size} sélectionnée${photoSel.size > 1 ? "s" : ""}`;
+  $("photoActions").querySelectorAll('[data-pa="share"],[data-pa="del"]').forEach((b) => (b.disabled = !photoSel.size));
+  $("photoGrid").innerHTML = ps.map((p) => `
+    <button class="ph ${photoSel.has(p.id) ? "selected" : ""}" data-pid="${p.id}" aria-label="${esc(p.name || p.code || "Photo")}">
+      <img src="${blobUrl(p)}" alt="" loading="lazy">
+      ${photoSelecting ? `<span class="pick">${photoSel.has(p.id) ? ico("check") : ""}</span>` : ""}
+      ${p.code ? `<span class="ph-code">${esc(p.code)}</span>` : ""}
+    </button>`).join("");
+}
+$("photoSelectBtn").addEventListener("click", () => { photoSelecting = !photoSelecting; photoSel.clear(); renderPhotos(); });
+$("view-photos").addEventListener("click", (e) => {
+  if (e.target.closest("[data-go-photo]")) { camMode = "photo"; settings.camMode = "photo"; store.set("cs-settings", settings); renderCamMode(); enterPhotoMode(); showView("scan"); return; }
+  const t = e.target.closest("[data-pid]"); if (!t) return;
+  const id = t.dataset.pid;
+  if (photoSelecting) { photoSel.has(id) ? photoSel.delete(id) : photoSel.add(id); renderPhotos(); return; }
+  openViewer(photoCache.findIndex((p) => p.id === id));
+});
+const photoFile = (p, i = 0) => new File([p.blob], `${(p.code || "carte").replace(/[^\w-]+/g, "")}${p.name ? "-" + p.name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\w]+/g, "-").slice(0, 40) : ""}${i ? "-" + i : ""}.jpg`, { type: "image/jpeg" });
+async function sharePhotos(list) {
+  const files = list.map((p, i) => photoFile(p, list.length > 1 ? i + 1 : 0));
+  try {
+    if (navigator.canShare?.({ files })) { await navigator.share({ files }); return; }
+  } catch (e) { if (e?.name === "AbortError") return; }
+  for (const f of files) { const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name; document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
+}
+async function deletePhotos(ids) {
+  for (const id of ids) { try { await idb.delPhoto(id); } catch {} dropUrls(id); }
+  photoCache = photoCache.filter((p) => !ids.includes(p.id)); updatePhotoBadge();
+}
+let photoDelArmed = 0;
+$("photoActions").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-pa]"); if (!b) return;
+  if (b.dataset.pa === "all") { if (photoSel.size === photoCache.length) photoSel.clear(); else photoCache.forEach((p) => photoSel.add(p.id)); renderPhotos(); return; }
+  const list = photoCache.filter((p) => photoSel.has(p.id)); if (!list.length) return;
+  if (b.dataset.pa === "share") return sharePhotos(list);
+  if (b.dataset.pa === "del") {
+    if (Date.now() - photoDelArmed > 4000) { photoDelArmed = Date.now(); b.querySelector("span").textContent = "Confirmer ?"; setTimeout(() => (b.querySelector("span").textContent = "Supprimer"), 4000); return; }
+    photoDelArmed = 0; await deletePhotos(list.map((p) => p.id)); photoSel.clear(); photoSelecting = false; renderPhotos(); toast(`${list.length} photo${list.length > 1 ? "s" : ""} supprimée${list.length > 1 ? "s" : ""}`);
+  }
+});
+function openViewer(i) {
+  if (i < 0 || !photoCache[i]) return;
+  viewerIdx = i; const p = photoCache[i];
+  $("viewerImg").src = blobUrl(p, "blob");
+  $("viewerPos").textContent = `${i + 1} / ${photoCache.length}`;
+  const d = new Date(p.createdAt);
+  const fake = { code: p.code, nameFR: p.name, nameEN: p.name, lang: REGION[(p.code.split("-")[1] || "").replace(/\d.*$/, "")] || "French", cm: 0 };
+  $("viewerInfo").innerHTML = `<strong>${esc(p.name || "Carte non identifiée")}</strong>
+    <span class="muted small">${p.code ? `<span class="code">${esc(p.code)}</span> · ` : ""}${d.toLocaleDateString("fr-FR")} à ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · ${p.w}×${p.h}</span>
+    ${p.code ? `<div class="edit-row">${marketLinks(fake)}</div>` : ""}`;
+  $("viewer").hidden = false;
+}
+let viewerDelArmed = 0;
+$("viewer").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-v]"); if (!b) return;
+  const a = b.dataset.v;
+  if (a === "close") { $("viewer").hidden = true; renderPhotos(); return; }
+  if (a === "prev") return openViewer(viewerIdx > 0 ? viewerIdx - 1 : photoCache.length - 1);
+  if (a === "next") return openViewer(viewerIdx < photoCache.length - 1 ? viewerIdx + 1 : 0);
+  if (a === "share") return sharePhotos([photoCache[viewerIdx]]);
+  if (a === "del") {
+    if (Date.now() - viewerDelArmed > 4000) { viewerDelArmed = Date.now(); toast("Appuie encore sur la corbeille pour supprimer cette photo"); return; }
+    viewerDelArmed = 0; await deletePhotos([photoCache[viewerIdx].id]);
+    if (!photoCache.length) { $("viewer").hidden = true; renderPhotos(); return; }
+    openViewer(Math.min(viewerIdx, photoCache.length - 1));
+  }
+});
+// swipe between photos
+let swipeX = null;
+$("viewer").addEventListener("touchstart", (e) => { swipeX = e.touches[0].clientX; }, { passive: true });
+$("viewer").addEventListener("touchend", (e) => {
+  if (swipeX == null) return; const dx = e.changedTouches[0].clientX - swipeX; swipeX = null;
+  if (Math.abs(dx) > 60) openViewer(dx < 0 ? (viewerIdx + 1) % photoCache.length : (viewerIdx - 1 + photoCache.length) % photoCache.length);
+});
+renderCamMode(); loadPhotos();
 $("photoInput").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) scanPhoto(f); });
 /* ----- manual add: by set code, or by name with suggestions ----- */
 const REGION_OF = { French: "FR", English: "EN", German: "DE", Italian: "IT", Spanish: "SP", Portuguese: "PT" };
