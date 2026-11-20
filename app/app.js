@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "12";
+const APP_VERSION = "14";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -787,7 +787,8 @@ const sb = window.supabase?.createClient(SUPA_URL, SUPA_KEY, { auth: { persistSe
 let user = null, syncing = false, syncAgain = false, syncTimer = null, lastSync = store.get("cs-lastsync", 0);
 
 function scheduleSync(ms = 2500) { if (!user) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, ms); }
-const toRow = (s) => ({ id: s.id, name: s.name, items: s.items, created_at: new Date(s.createdAt).toISOString(), updated_at: new Date(s.updatedAt || s.createdAt).toISOString(), deleted: false });
+const iso = (t) => new Date(Number.isFinite(t) ? t : Date.now()).toISOString();
+const toRow = (s) => ({ id: s.id, name: s.name, items: s.items, created_at: iso(s.createdAt || s.updatedAt), updated_at: iso(s.updatedAt || s.createdAt), deleted: false });
 async function sync() {
   if (!sb || !user || !navigator.onLine) return;
   if (syncing) { syncAgain = true; return; }
@@ -809,8 +810,13 @@ async function sync() {
     // 2. send local changes and deletions out
     // (a brand-new empty session stays local until it holds a card, so devices don't pile up empty lists)
     const up = sessions.filter((s) => { const r = byId.get(s.id); return r ? (s.updatedAt || 0) > Date.parse(r.updated_at) : s.items.length > 0; }).map(toRow);
-    for (const d of dead) if (!byId.get(d.id)?.deleted) up.push({ id: d.id, name: "", items: [], updated_at: new Date(d.at).toISOString(), deleted: true });
-    if (up.length) { const { error: e2 } = await sb.from("scan_sessions").upsert(up); if (e2) throw e2; }
+    // Deleted sessions are sent as "deleted" rows with every column filled: in a batch, a missing
+    // column is sent as null, and created_at may not be null.
+    for (const d of dead) if (!byId.get(d.id)?.deleted) {
+      const r = byId.get(d.id);
+      up.push({ id: d.id, name: r?.name || "", items: [], created_at: r?.created_at || iso(d.at), updated_at: iso(d.at), deleted: true });
+    }
+    if (up.length) { const { error: e2 } = await sb.from("scan_sessions").upsert(up, { defaultToNull: false }); if (e2) throw e2; }
     store.set("cs-deleted", []);
     if (changedLocal) {
       if (!sessions.length) sessions = [newSession()];

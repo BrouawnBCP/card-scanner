@@ -1,7 +1,7 @@
 ﻿// Offline support: app files are served network-first (updates show up when online),
 // the OCR engine is cache-first (large and versioned), the card data network-first.
-const CACHE = "card-scanner-v12";
-const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon-180.png", "icons/icon-192.png", "data/cards.json"];
+const CACHE = "card-scanner-v14";
+const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon-180.png", "icons/icon-192.png", "icons/logo.png", "data/cards.json"];
 // ort-wasm.wasm (no SIMD) is only fetched by old phones, so it is cached on first use instead.
 const VENDOR = ["vendor/ort/ort.min.js", "vendor/ort/ort-wasm-simd.wasm", "vendor/paddle/det.onnx", "vendor/paddle/rec.onnx", "vendor/paddle/keys.txt", "vendor/supabase/supabase.js"];
 

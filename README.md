@@ -11,7 +11,7 @@ aux codes qui existent vraiment (base YGOPRODeck). Les cotes viennent du guide d
 | `app/` | Le site publié (page, scanner, liste, export, mode hors ligne) |
 | `app/vendor/paddle/`, `app/vendor/ort/` | Moteur de lecture de texte (PaddleOCR + ONNX Runtime), embarqué pour marcher hors ligne |
 | `tools/build_data.py` | Construit `app/data/cards.json` (cartes, codes, identifiants et cotes Cardmarket) |
-| `tools/make_icons.py` | Dessine les icônes de l'appli |
+| `app/icons/` | Icône de l'appli (180, 192, 512 px) et logo de l'écran de connexion |
 | `.github/workflows/deploy.yml` | Chaque nuit : reconstruit les données et republie le site sur GitHub Pages |
 | `prototype/` | Première version (page Claude), gardée pour référence |
 
