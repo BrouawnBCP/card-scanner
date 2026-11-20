@@ -4,6 +4,9 @@ app/data/
 app/img/
 # Built from your personal Cardmarket export: keep it off the public repository
 tools/rarity_overrides.json
+# Discord feedback: the bot key (secret) and the testers' messages (private)
+discord-token.txt
+feedback/
 # Personal test files
 *.csv
 .claude/
