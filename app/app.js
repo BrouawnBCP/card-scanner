@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "18";
+const APP_VERSION = "19";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1202,12 +1202,20 @@ let user = null, syncing = false, syncAgain = false, syncTimer = null, lastSync 
 function scheduleSync(ms = 2500) { if (!user) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, ms); }
 const iso = (t) => new Date(Number.isFinite(t) ? t : Date.now()).toISOString();
 const toRow = (s) => ({ id: s.id, name: s.name, items: s.items, created_at: iso(s.createdAt || s.updatedAt), updated_at: iso(s.updatedAt || s.createdAt), deleted: false });
+const isAuthError = (e) => /jwt|token|401|PGRST30/i.test(`${e?.code} ${e?.message} ${e?.status}`);
 async function sync() {
   if (!sb || !user || !navigator.onLine) return;
   if (syncing) { syncAgain = true; return; }
   syncing = true; setCloud("busy");
+  let skipped = [];
   try {
-    const { data: remote, error } = await sb.from("scan_sessions").select("id,name,items,created_at,updated_at,deleted");
+    let { data: remote, error } = await sb.from("scan_sessions").select("id,name,items,created_at,updated_at,deleted");
+    if (error && isAuthError(error)) {
+      // access expired while the app was closed: renew it once, then retry
+      const { error: re } = await sb.auth.refreshSession();
+      if (re) throw re;
+      ({ data: remote, error } = await sb.from("scan_sessions").select("id,name,items,created_at,updated_at,deleted"));
+    }
     if (error) throw error;
     const dead = store.get("cs-deleted", []);
     const byId = new Map(remote.map((r) => [r.id, r]));
@@ -1229,7 +1237,17 @@ async function sync() {
       const r = byId.get(d.id);
       up.push({ id: d.id, name: r?.name || "", items: [], created_at: r?.created_at || iso(d.at), updated_at: iso(d.at), deleted: true });
     }
-    if (up.length) { const { error: e2 } = await sb.from("scan_sessions").upsert(up, { defaultToNull: false }); if (e2) throw e2; }
+    if (up.length) {
+      const { error: e2 } = await sb.from("scan_sessions").upsert(up, { defaultToNull: false });
+      if (e2) {
+        if (isAuthError(e2)) throw e2;
+        // One bad session must not block the others: send them one by one and set aside the ones refused.
+        for (const row of up) {
+          const { error: e3 } = await sb.from("scan_sessions").upsert([row], { defaultToNull: false });
+          if (e3) { console.warn("session refused", row.id, e3); skipped.push({ row, e: e3 }); }
+        }
+      }
+    }
     store.set("cs-deleted", []);
     if (changedLocal) {
       if (!sessions.length) sessions = [newSession()];
@@ -1240,7 +1258,11 @@ async function sync() {
       persist(); renderList(); renderSessionBar(); renderLast();
       if (!$("sheet").hidden) renderSessions();
     }
-    lastSync = Date.now(); store.set("cs-lastsync", lastSync); setCloud("ok");
+    lastSync = Date.now(); store.set("cs-lastsync", lastSync);
+    if (skipped.length) {
+      const e = skipped[0].e, name = skipped[0].row.name || "session supprimée";
+      setCloud("err", `${skipped.length} session(s) non envoyée(s), dont « ${name} » (${[e.code, e.message].filter(Boolean).join(" · ").slice(0, 140)}). Les autres sont synchronisées.`);
+    } else setCloud("ok");
   } catch (e) {
     console.warn(e);
     const detail = [e?.code, e?.message || String(e)].filter(Boolean).join(" · ").slice(0, 160);
@@ -1307,9 +1329,13 @@ $("logoutBtn").addEventListener("click", async () => {
 });
 // First screen: the home page when signed in (or when the person chose to go on without an account), else sign-in.
 let routed = false;
+// A session saved on this phone counts as signed in right away: confirming it with Supabase can take
+// several seconds after a long pause (the access token is renewed first), and we must not show the
+// sign-in screen meanwhile. If the session really is invalid, Supabase sends SIGNED_OUT and we go back.
+const hasStoredSession = () => { try { return !!localStorage.getItem("cs-auth"); } catch { return false; } };
 function route() {
   if (routed) return; routed = true;
-  showView(user || store.get("cs-guest", false) ? "home" : "auth");
+  showView(user || hasStoredSession() || store.get("cs-guest", false) ? "home" : "auth");
   $("splash").hidden = true;
 }
 setTimeout(route, 2500); // never stay on the splash (no network, auth library missing…)
@@ -1318,7 +1344,9 @@ if (sb) {
     const was = user?.id; user = session?.user || null; renderAccount();
     if (user && user.id !== was) scheduleSync(200);
     if (ev === "INITIAL_SESSION") route();
+    if (user && view === "auth" && ev !== "SIGNED_OUT") showView("home"); // session confirmed after a slow start
     if (ev === "SIGNED_OUT" && view && view !== "auth") showView("auth");
+    if (view === "home") renderHome();
   });
   window.addEventListener("online", () => scheduleSync(500));
   document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleSync(800); });
