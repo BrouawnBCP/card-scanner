@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Confidentialité — Card Scanner</title>
+<meta name="description" content="Règles de confidentialité de l'application Card Scanner.">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root{--bg:#0b0e15;--surface:#141925;--line:#262d3e;--ink:#eef1f7;--muted:#8d96ab;--gold:#e2b04a}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  main{max-width:720px;margin:0 auto;padding:32px 16px 64px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+  header img{width:56px;height:56px;border-radius:14px}
+  h1{font-size:26px;line-height:1.2;margin:0}
+  h2{font-size:18px;color:var(--gold);margin:32px 0 8px}
+  p,li{color:var(--ink)}
+  ul{padding-left:20px;margin:8px 0}
+  li{margin:4px 0}
+  .muted{color:var(--muted);font-size:14px}
+  .box{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:20px 0}
+  a{color:var(--gold)}
+  .back{display:inline-block;margin-top:36px;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icons/icon-192.png" alt="">
+    <h1>Règles de confidentialité</h1>
+  </header>
+  <p class="muted">Card Scanner · dernière mise à jour : 20 novembre 2026</p>
+
+  <div class="box">
+    <strong>En bref :</strong> Card Scanner sert uniquement à scanner tes cartes Yu-Gi-Oh et à retrouver tes listes sur tes appareils.
+    Il n'y a ni publicité, ni pistage, ni revente de données. Les images de la caméra sont analysées sur ton téléphone et ne sont jamais envoyées.
+  </div>
+
+  <h2>Données gardées sur ton appareil uniquement</h2>
+  <ul>
+    <li><strong>La caméra</strong> : la lecture des codes de cartes se fait entièrement sur ton téléphone. Aucune image n'est envoyée sur internet.</li>
+    <li><strong>Les photos</strong> prises en mode Photo restent dans la mémoire de ton appareil. Elles ne sont envoyées nulle part, sauf si tu les partages toi-même.</li>
+    <li><strong>Tes réglages</strong> et le <strong>stock Cardmarket</strong> que tu importes restent sur l'appareil.</li>
+    <li>Sans compte, <strong>toutes tes sessions de scan</strong> restent aussi sur l'appareil.</li>
+  </ul>
+
+  <h2>Données enregistrées si tu crées un compte</h2>
+  <p>Le compte sert uniquement à synchroniser tes listes entre tes appareils. Il enregistre :</p>
+  <ul>
+    <li><strong>ton adresse e-mail</strong> ;</li>
+    <li>si tu te connectes avec <strong>Google</strong> ou <strong>Discord</strong> : l'identifiant, le nom et l'image de profil que ce service transmet. L'application ne reçoit jamais ton mot de passe Google ou Discord, et n'a accès ni à tes e-mails, ni à tes messages, ni à tes serveurs ;</li>
+    <li><strong>tes sessions de scan</strong> : nom de la session, cartes (code, nom, rareté, langue, état, prix, commentaire), dates.</li>
+  </ul>
+  <p>Ces données sont hébergées par <a href="https://supabase.com/privacy" rel="noopener">Supabase</a>. Chaque compte ne peut lire et modifier que ses propres sessions.</p>
+
+  <h2>Services tiers</h2>
+  <ul>
+    <li><strong>GitHub Pages</strong> héberge le site de l'application.</li>
+    <li><strong>Supabase</strong> gère les comptes et la synchronisation.</li>
+    <li><strong>Google</strong> et <strong>Discord</strong> interviennent seulement si tu choisis de te connecter avec eux.</li>
+    <li>Les boutons <strong>Cardmarket</strong>, <strong>eBay</strong> et <strong>Vinted</strong> ouvrent ces sites quand tu appuies dessus. Ces sites appliquent alors leurs propres règles.</li>
+  </ul>
+  <p>Les prix et les informations des cartes proviennent de fichiers publics (Cardmarket, YGOPRODeck), mis à jour chaque nuit. Ta navigation ne leur est pas transmise.</p>
+
+  <h2>Supprimer tes données</h2>
+  <ul>
+    <li>Dans l'application, tu peux supprimer chaque session ou tout l'historique : la suppression est aussi faite sur ton compte.</li>
+    <li>Pour supprimer entièrement ton compte, fais-en la demande sur la page
+      <a href="https://github.com/BrouawnBCP/card-scanner/issues" rel="noopener">github.com/BrouawnBCP/card-scanner/issues</a>.
+      Le compte et toutes ses sessions seront effacés.</li>
+    <li>Tu peux aussi retirer l'accès de Card Scanner dans les paramètres de ton compte Google (« Applications tierces ») ou Discord (« Applications autorisées »).</li>
+  </ul>
+
+  <h2>Contact</h2>
+  <p>Pour toute question : <a href="https://github.com/BrouawnBCP/card-scanner/issues" rel="noopener">github.com/BrouawnBCP/card-scanner/issues</a>.</p>
+
+  <a class="back" href="./">← Retour à Card Scanner</a>
+</main>
+</body>
+</html>
