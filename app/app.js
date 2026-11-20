@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "25";
+const APP_VERSION = "26";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -651,7 +651,10 @@ function setRarity(it, rarity) {
 const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(it.code || it.nameEN || "")}`;
 /** Cardmarket and eBay logo buttons. */
 const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
-  + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`;
+  + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`
+  + `<a class="brand-btn vinted" href="${vintedLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.nameFR || it.nameEN)} sur Vinted" title="Rechercher sur Vinted"><img src="icons/brands/vinted.png" alt="" width="24" height="24"></a>`;
+/** Vinted France search on the card's name (sellers rarely write the set code there). */
+const vintedLink = (it) => `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(String(it.nameFR || it.nameEN || "").replace(/^"+|"+$/g, ""))}`;
 // Cardmarket language ids (offer filter "language=").
 const CM_LANG = { English: 1, French: 2, German: 3, Spanish: 4, Italian: 5, Portuguese: 8 };
 /** Product page with offers filtered on the card's language; a name search when the exact product is unknown. */
