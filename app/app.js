@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "21";
+const APP_VERSION = "22";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -612,6 +612,9 @@ function setRarity(it, rarity) {
 }
 /** eBay France search on the printed set code (MP20-FR167): finds that exact print and language. */
 const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(it.code || it.nameEN || "")}`;
+/** Cardmarket and eBay logo buttons. */
+const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
+  + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`;
 // Cardmarket language ids (offer filter "language=").
 const CM_LANG = { English: 1, French: 2, German: 3, Spanish: 4, Italian: 5, Portuguese: 8 };
 /** Product page with offers filtered on the card's language; a name search when the exact product is unknown. */
@@ -683,8 +686,7 @@ function renderLast() {
       <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
       <button class="chip" data-act="plus">${ico("plus")} 1</button>
       <button class="chip" data-act="undo">${ico("undo")} Annuler</button>
-      <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket ${LANG_SHORT[it.lang] || ""}</a>
-      <a class="chip ebay" href="${ebayLink(it)}" target="_blank" rel="noopener">${ico("ext")} eBay</a>
+      ${marketLinks(it)}
     </div>`;
 }
 $("last").addEventListener("click", (e) => {
@@ -865,8 +867,7 @@ function editPanel(it) {
     <div class="edit-row full">
       <span class="qty"><button data-act="minus" aria-label="Retirer un exemplaire">${ico("minus")}</button><span>${it.qty}</span><button data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")}</button></span>
       <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
-      <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket</a>
-      <a class="chip ebay" href="${ebayLink(it)}" target="_blank" rel="noopener">${ico("ext")} eBay</a>
+      ${marketLinks(it)}
       <button class="del" data-act="del" aria-label="Supprimer">${ico("trash")}</button>
     </div>
   </div>`;
@@ -880,7 +881,7 @@ function collDetail(it) {
     ${stockLine(it)}
     <p class="full muted small">Présente dans ${it.sessionsIn.length} session${it.sessionsIn.length > 1 ? "s" : ""} :</p>
     ${it.sessionsIn.map(({ s, qty }) => `<button class="sess-link full" data-act="opensession" data-sid="${s.id}"><span>${esc(s.name)}</span><span class="tag qty">×${qty}</span>${ico("chev")}</button>`).join("")}
-    <div class="edit-row"><a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Voir sur Cardmarket</a><a class="chip ebay" href="${ebayLink(it)}" target="_blank" rel="noopener">${ico("ext")} eBay</a></div>
+    <div class="edit-row">${marketLinks(it)}</div>
   </div>`;
 }
 const itemOf = (el) => items.find((x) => x.id === el.closest("[data-id]")?.dataset.id);
