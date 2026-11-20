@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -34,6 +34,8 @@
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.6 1.5A3.5 3.5 0 0 1 17.5 18z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-gem" viewBox="0 0 24 24"><path d="M6 3h12l4 6-10 12L2 9z"/><path d="M2 9h20M12 21 8 9l4-6 4 6z"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></symbol>
   <symbol id="i-card" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><rect x="8" y="6" width="8" height="7" rx="1"/><path d="M8 16h8M8 18.5h5"/></symbol>
 </svg>
@@ -134,11 +136,12 @@
     <div class="last" id="last" hidden></div>
 
     <details class="manual-wrap" id="manualWrap">
-      <summary><svg class="ico sm"><use href="#i-keyboard"/></svg> Saisir un code à la main</summary>
+      <summary><svg class="ico sm"><use href="#i-keyboard"/></svg> Ajouter à la main (code ou nom)</summary>
       <form class="manual" id="manualForm" autocomplete="off">
-        <input id="manualCode" class="mono" placeholder="MP20-FR167" aria-label="Code de set">
+        <input id="manualCode" placeholder="MP20-FR167 ou « Galant Granite »" aria-label="Code de set ou nom de la carte" autocapitalize="off" spellcheck="false">
         <button class="btn primary" type="submit">Ajouter</button>
       </form>
+      <div class="suggest" id="suggest" hidden></div>
     </details>
 
     <div class="debug" id="debug" hidden>
@@ -160,12 +163,44 @@
       <div class="stat warn" id="statTodoBox"><span class="stat-v" id="statTodo">0</span><span class="stat-l">à vérifier</span></div>
     </div>
     <div class="list-tools">
-      <div class="segmented filters" role="tablist">
-        <button class="seg on" data-filter="all">Tout</button>
-        <button class="seg" data-filter="todo">À vérifier</button>
-      </div>
+      <input id="listSearch" type="search" placeholder="Rechercher un nom, un code…" aria-label="Rechercher dans la liste" autocapitalize="off" spellcheck="false">
       <button class="btn primary" id="exportBtn"><svg class="ico sm"><use href="#i-share"/></svg> Exporter</button>
     </div>
+    <div class="list-filters">
+      <label class="mini-select"><span>Trier</span>
+        <select id="listSort">
+          <option value="recent">Plus récentes</option>
+          <option value="priceDesc">Prix décroissant</option>
+          <option value="priceAsc">Prix croissant</option>
+          <option value="name">Nom (A → Z)</option>
+          <option value="set">Extension</option>
+        </select>
+      </label>
+      <label class="mini-select"><span>Afficher</span>
+        <select id="listFilter">
+          <option value="all">Toutes les cartes</option>
+          <option value="todo">À vérifier</option>
+          <option value="gem">Pépites</option>
+          <optgroup label="Rareté">
+            <option value="rar:r-c">Communes</option>
+            <option value="rar:r-r">Rares</option>
+            <option value="rar:r-sr">Super Rares</option>
+            <option value="rar:r-ur">Ultra / Ultimate Rares</option>
+            <option value="rar:r-scr">Secret Rares et plus</option>
+            <option value="rar:r-gold">Gold Rares</option>
+          </optgroup>
+          <optgroup label="Langue">
+            <option value="lang:French">Français</option>
+            <option value="lang:English">Anglais</option>
+            <option value="lang:German">Allemand</option>
+            <option value="lang:Italian">Italien</option>
+            <option value="lang:Spanish">Espagnol</option>
+            <option value="lang:Portuguese">Portugais</option>
+          </optgroup>
+        </select>
+      </label>
+    </div>
+    <p class="muted small" id="listCount" hidden></p>
     <p class="note" id="exportNote" hidden></p>
     <div id="list" class="list"></div>
     <div class="empty" id="empty">
@@ -173,6 +208,11 @@
       <p>Aucune carte dans cette session.</p>
       <p class="muted small">Passe sur « Scanner » et présente une carte devant la caméra.</p>
     </div>
+
+    <details class="panel insights" id="insights" hidden>
+      <summary><svg class="ico sm"><use href="#i-chart"/></svg> Top de la session</summary>
+      <div id="insightsBody"></div>
+    </details>
   </section>
 
   <!-- ===== Réglages ===== -->
@@ -211,6 +251,9 @@
 
     <section class="panel">
       <h2 class="panel-title">Scan et export</h2>
+      <label class="field">Alerte « pépite » à partir de (€, 0 = désactivée)
+        <input id="setGem" type="number" inputmode="decimal" min="0" step="0.5" placeholder="5">
+      </label>
       <label class="switch"><span>Prix de vente = cote tendance</span><input type="checkbox" id="setPriceTrend"><i></i></label>
       <label class="switch"><span>Bip à chaque carte</span><input type="checkbox" id="setSound" checked><i></i></label>
       <label class="switch"><span>Mode diagnostic</span><input type="checkbox" id="setDebug"><i></i></label>
@@ -243,6 +286,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=14"></script>
+<script type="module" src="app.js?v=15"></script>
 </body>
 </html>

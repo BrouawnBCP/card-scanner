@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "14";
+const APP_VERSION = "15";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -16,7 +16,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-const settings = Object.assign({ cond: "NM", lang: "French", comment: "", priceTrend: false, sound: true, debug: false, torch: false }, store.get("cs-settings", {}));
+const settings = Object.assign({ cond: "NM", lang: "French", comment: "", priceTrend: false, sound: true, debug: false, torch: false, gem: 5 }, store.get("cs-settings", {}));
 
 /* ----- sessions: one list per scanning session ----- */
 function newSession(itemsIn = []) {
@@ -386,7 +386,7 @@ async function scanFrame() {
     const it = makeItem(m, { firstEd });
     commit(it, "scan");
     last = { sig, key: m.key }; changed = false; changedHits = 0; reads = []; sawEmpty = false;
-    celebrate(it); beep();
+    celebrate(it);
     setStatus(`Ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`);
   } else setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`);
 }
@@ -410,15 +410,37 @@ function showDebug(zone, res, r) {
 /** Restart a one-shot CSS animation on an element. */
 function bump(el, cls = "bump") { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
 /** Visual feedback when a card is added: green frame, a ticket flying to the list, counter pop. */
+/** A "pépite": a card whose Cardmarket price reaches the threshold set in Réglages. */
+function gemPrice(it) {
+  const p = cmPrice(it.cm), t = Number(settings.gem) || 0;
+  return t > 0 && p && p.hi >= t ? p : null;
+}
 function celebrate(it) {
   bump($("guide"), "hit");
+  const gem = gemPrice(it);
   const fly = document.createElement("div");
-  fly.className = "fly";
-  fly.innerHTML = `<span class="code">${esc(it.code)}</span><span>${esc(it.nameFR)}</span>`;
+  fly.className = gem ? "fly gem" : "fly";
+  fly.innerHTML = gem
+    ? `<span class="gem-title">${ico("gem")} Pépite !</span><span>${esc(it.nameFR)}</span><span class="gem-price">${gem.lo === gem.hi ? esc(eur(gem.lo)) : `jusqu'à ${esc(eur(gem.hi))}`}</span>`
+    : `<span class="code">${esc(it.code)}</span><span>${esc(it.nameFR)}</span>`;
   $("stage").append(fly);
+  if (gem) { const burst = document.createElement("div"); burst.className = "burst"; $("stage").append(burst); setTimeout(() => burst.remove(), 1600); }
   fly.addEventListener("animationend", () => fly.remove());
-  setTimeout(() => fly.remove(), 1500);
+  setTimeout(() => fly.remove(), gem ? 2600 : 1500);
   bump($("tabCount")); bump($("sessionCount"));
+  gem ? chime() : beep();
+}
+/** Three rising notes for a pépite. */
+function chime() {
+  if (!settings.sound || !audioCtx) return;
+  try {
+    [988, 1319, 1976].forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = audioCtx.currentTime + i * 0.09;
+      o.type = "triangle"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.3, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t + 0.36);
+    });
+  } catch {}
 }
 function beep() {
   if (!settings.sound || !audioCtx) return;
@@ -564,7 +586,29 @@ $("last").addEventListener("click", (e) => {
   saveItems(); renderLast();
 });
 
-let filter = "all", openId = null;
+let filter = "all", sortBy = "recent", query = "", openId = null;
+const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]/g, "");
+const unitPrice = (it) => { const p = cmPrice(it.cm); return p ? (p.lo + p.hi) / 2 : -1; };
+const rarClass = (r) => (RAR[r] || [null, "r-c"])[1];
+function visibleItems() {
+  const q = fold(query);
+  let out = items.filter((it) => {
+    if (q && !fold(`${it.nameFR} ${it.nameEN} ${it.code} ${it.set}`).includes(q)) return false;
+    if (filter === "todo") return !it.rarity;
+    if (filter === "gem") return !!gemPrice(it);
+    if (filter.startsWith("rar:")) return it.rarity && rarClass(it.rarity) === filter.slice(4);
+    if (filter.startsWith("lang:")) return it.lang === filter.slice(5);
+    return true;
+  });
+  const by = {
+    priceDesc: (a, b) => unitPrice(b) - unitPrice(a),
+    priceAsc: (a, b) => (unitPrice(a) < 0) - (unitPrice(b) < 0) || unitPrice(a) - unitPrice(b),
+    name: (a, b) => a.nameFR.localeCompare(b.nameFR, "fr"),
+    set: (a, b) => a.set.localeCompare(b.set, "fr") || a.code.localeCompare(b.code),
+  }[sortBy];
+  if (by) out = [...out].sort(by);
+  return out;
+}
 function renderList() {
   const total = items.reduce((n, x) => n + x.qty, 0);
   let value = 0, priced = 0;
@@ -578,8 +622,12 @@ function renderList() {
   $("statTodo").textContent = todo; $("statTodoBox").classList.toggle("has", todo > 0);
   $("exportNote").hidden = !todo;
   $("exportNote").textContent = `${todo} carte${todo > 1 ? "s" : ""} sans rareté : choisis-la pour qu'elle${todo > 1 ? "s soient exportées" : " soit exportée"}.`;
-  const shown = filter === "todo" ? items.filter((x) => !x.rarity) : items;
+  const shown = visibleItems();
+  const narrowed = shown.length !== items.length;
+  $("listCount").hidden = !narrowed || !items.length;
+  $("listCount").textContent = shown.length ? `${shown.length} carte${shown.length > 1 ? "s" : ""} sur ${items.length} affichée${shown.length > 1 ? "s" : ""}` : "Aucune carte ne correspond.";
   $("empty").hidden = items.length > 0;
+  renderInsights();
   $("list").innerHTML = shown.map((it) => {
     const isNew = Date.now() - it.createdAt < 1500, open = openId === it.id;
     return `<div class="item ${it.rarity ? "" : "todo"} ${isNew ? "enter" : ""}" data-id="${it.id}">
@@ -591,7 +639,7 @@ function renderList() {
         </span>
         <span class="row-side">
           ${priceHtml(it.cm)}
-          <span class="tags">${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span><span class="tag">${esc(it.condition)}</span></span>
+          <span class="tags">${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span><span class="tag">${esc(it.condition)}</span></span>
         </span>
       </button>
       ${open ? `<div class="edit">
@@ -629,12 +677,39 @@ $("list").addEventListener("change", (e) => {
   else it[f] = e.target.value.trim();
   saveItems(); renderLast();
 });
-document.querySelector(".filters").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-filter]"); if (!b) return;
-  filter = b.dataset.filter;
-  document.querySelectorAll(".filters .seg").forEach((c) => c.classList.toggle("on", c === b));
-  renderList();
-});
+let searchT;
+$("listSearch").addEventListener("input", (e) => { clearTimeout(searchT); searchT = setTimeout(() => { query = e.target.value; renderList(); }, 120); });
+$("listSort").addEventListener("change", (e) => { sortBy = e.target.value; renderList(); });
+$("listFilter").addEventListener("change", (e) => { filter = e.target.value; renderList(); });
+$("statTodoBox").addEventListener("click", () => { filter = filter === "todo" ? "all" : "todo"; $("listFilter").value = filter; renderList(); });
+
+/* ----- "Top de la session": most valuable cards and value per expansion ----- */
+function renderInsights() {
+  const box = $("insights");
+  const priced = items.map((it) => ({ it, p: cmPrice(it.cm) })).filter((x) => x.p && x.p.lo === x.p.hi);
+  box.hidden = priced.length < 2;
+  if (box.hidden) return;
+  const top = [...priced].sort((a, b) => b.p.lo - a.p.lo).slice(0, 10);
+  const bySet = new Map();
+  for (const { it, p } of priced) bySet.set(it.set, (bySet.get(it.set) || 0) + p.lo * it.qty);
+  const sets = [...bySet.entries()].sort((a, b) => b[1] - a[1]);
+  const shownSets = sets.slice(0, 8), rest = sets.slice(8).reduce((n, [, v]) => n + v, 0);
+  const max = shownSets[0]?.[1] || 1;
+  $("insightsBody").innerHTML = `
+    <h3 class="ins-title">Les ${top.length} cartes les plus chères</h3>
+    <ol class="top">${top.map(({ it, p }, i) => `
+      <li><span class="rank">${i + 1}</span>${thumb(it)}
+        <span class="row-text"><span class="name">${esc(it.nameFR)}</span><span class="meta"><span class="code">${esc(it.code)}</span>${it.qty > 1 ? ` · ×${it.qty}` : ""}</span></span>
+        <span class="price">${esc(eur(p.lo))}</span></li>`).join("")}
+    </ol>
+    <h3 class="ins-title">Valeur par extension</h3>
+    <div class="bars">${shownSets.map(([s, v]) => `
+      <div class="bar"><div class="bar-head"><span class="bar-name">${esc(s)}</span><span class="bar-val">${esc(eur(v))}</span></div>
+        <div class="bar-track"><span style="width:${Math.max(3, (v / max) * 100).toFixed(1)}%"></span></div></div>`).join("")}
+      ${rest ? `<div class="bar muted small">+ ${sets.length - 8} autres extensions : ${esc(eur(rest))}</div>` : ""}
+    </div>
+    <p class="muted small">Calculé sur les cartes dont la version exacte est connue (cote tendance Cardmarket).</p>`;
+}
 
 /* ================= sessions UI ================= */
 function sessionStats(s) {
@@ -719,12 +794,15 @@ $("exportBtn").addEventListener("click", async () => {
 function bindSettings() {
   $("setCond").value = settings.cond; $("setLang").value = settings.lang; $("setComment").value = settings.comment;
   $("setPriceTrend").checked = settings.priceTrend; $("setSound").checked = settings.sound; $("setDebug").checked = settings.debug;
+  $("setGem").value = settings.gem;
   const save = () => {
-    Object.assign(settings, { cond: $("setCond").value, lang: $("setLang").value, comment: $("setComment").value.trim(), priceTrend: $("setPriceTrend").checked, sound: $("setSound").checked, debug: $("setDebug").checked });
+    const gem = Math.max(0, Number(String($("setGem").value).replace(",", ".")) || 0);
+    Object.assign(settings, { cond: $("setCond").value, lang: $("setLang").value, comment: $("setComment").value.trim(), priceTrend: $("setPriceTrend").checked, sound: $("setSound").checked, debug: $("setDebug").checked, gem });
     store.set("cs-settings", settings);
     if (!settings.debug) $("debug").hidden = true;
+    renderList();
   };
-  ["setCond", "setLang", "setComment", "setPriceTrend", "setSound", "setDebug"].forEach((id) => $(id).addEventListener("change", save));
+  ["setCond", "setLang", "setComment", "setPriceTrend", "setSound", "setDebug", "setGem"].forEach((id) => $(id).addEventListener("change", save));
 }
 let clearArmed = 0;
 $("clearBtn").addEventListener("click", () => {
@@ -769,11 +847,72 @@ document.addEventListener("visibilitychange", () => {
 });
 $("startBtn").addEventListener("click", () => scanning ? stopCamera() : startCamera());
 $("photoInput").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) scanPhoto(f); });
+/* ----- manual add: by set code, or by name with suggestions ----- */
+const REGION_OF = { French: "FR", English: "EN", German: "DE", Italian: "IT", Spanish: "SP", Portuguese: "PT" };
+let nameIdx = null, cardPrints = null;
+function buildNameIndex() {
+  if (nameIdx || !DATA) return;
+  nameIdx = DATA.cards.map((c, i) => ({ i, fr: fold(c[1]), en: fold(c[0]) }));
+  cardPrints = new Map();
+  for (const [key, list] of Object.entries(DATA.prints))
+    for (const e of list) { if (!cardPrints.has(e[0])) cardPrints.set(e[0], []); cardPrints.get(e[0]).push({ key, set: DATA.sets[e[1]], rarity: e[2] }); }
+}
+const looksLikeCode = (s) => /^[a-z0-9]{2,5}-[a-z]{0,2}\d/i.test(s.trim());
+function searchNames(q) {
+  buildNameIndex();
+  const f = fold(q); if (f.length < 3) return [];
+  const starts = [], inside = [];
+  for (const n of nameIdx) {
+    if (n.fr.startsWith(f) || n.en.startsWith(f)) starts.push(n);
+    else if (n.fr.includes(f) || n.en.includes(f)) inside.push(n);
+  }
+  // exact name first, then the shortest names (the "base" card before its variants)
+  const score = (n) => (n.fr === f || n.en === f ? -1000 : 0) + Math.min(n.fr.length || 999, n.en.length);
+  starts.sort((a, b) => score(a) - score(b)); inside.sort((a, b) => score(a) - score(b));
+  return [...starts, ...inside].slice(0, 8).map((n) => n.i);
+}
+function showSuggest(html) { $("suggest").innerHTML = html; $("suggest").hidden = !html; }
+function suggestCards(q) {
+  if (!DATA || looksLikeCode(q)) return showSuggest("");
+  const hits = searchNames(q);
+  showSuggest(hits.length ? hits.map((i) => {
+    const [en, fr, id] = DATA.cards[i];
+    return `<button type="button" class="sug" data-card="${i}">
+      <span class="thumb sm">${id ? `<img src="img/${id}.webp" alt="" loading="lazy" onerror="this.remove()">` : ""}</span>
+      <span class="row-text"><span class="name">${esc(fr || en)}</span>${fr && fr !== en ? `<span class="meta">${esc(en)}</span>` : ""}</span>
+      <span class="muted small">${(cardPrints.get(i) || []).length} version${(cardPrints.get(i) || []).length > 1 ? "s" : ""}</span></button>`;
+  }).join("") : `<p class="muted small sug-empty">Aucune carte trouvée pour « ${esc(q)} ».</p>`);
+}
+function suggestPrints(i) {
+  const [en, fr] = DATA.cards[i];
+  const prints = (cardPrints.get(i) || []).slice().sort((a, b) => a.set.localeCompare(b.set, "fr"));
+  showSuggest(`<p class="sug-head"><button type="button" class="link-btn" data-back="1">← Retour</button><strong>${esc(fr || en)}</strong> · choisis la version</p>
+    ${prints.map((p) => `<button type="button" class="sug" data-key="${esc(p.key)}" data-rar="${esc(p.rarity)}" data-cardidx="${i}">
+      ${rarBadge(p.rarity)}<span class="row-text"><span class="name code">${esc(p.key.replace("-", `-${REGION_OF[settings.lang] || "FR"}`))}</span><span class="meta">${esc(p.set)}</span></span></button>`).join("")}`);
+}
+let sugT;
+$("manualCode").addEventListener("input", (e) => { clearTimeout(sugT); sugT = setTimeout(() => suggestCards(e.target.value), 150); });
+$("suggest").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.back) return suggestCards($("manualCode").value);
+  if (b.dataset.card) return suggestPrints(Number(b.dataset.card));
+  if (b.dataset.key) {
+    const region = REGION_OF[settings.lang] || "FR", [pre, num] = b.dataset.key.split("-");
+    const it = makeItem({ key: b.dataset.key, code: `${pre}-${region}${num}`, region });
+    const c = it.cands.find((x) => x.rarity === b.dataset.rar && x.card === Number(b.dataset.cardidx)) || it.cands.find((x) => x.rarity === b.dataset.rar);
+    if (c) applyCandidate(it, c);
+    $("manualCode").value = ""; showSuggest(""); commit(it, "manual");
+  }
+});
 $("manualForm").addEventListener("submit", (e) => {
   e.preventDefault(); if (!DATA) return;
-  const m = matchManual($("manualCode").value);
-  if (!m) { toast("Code introuvable. Format : MP20-FR167"); return; }
-  $("manualCode").value = ""; commit(makeItem(m), "manual");
+  const v = $("manualCode").value;
+  const m = matchManual(v);
+  if (m) { $("manualCode").value = ""; showSuggest(""); commit(makeItem(m), "manual"); return; }
+  const hits = looksLikeCode(v) ? [] : searchNames(v);
+  if (hits.length === 1) return suggestPrints(hits[0]);
+  if (hits.length) return suggestCards(v);
+  toast("Ni code ni nom reconnu. Exemple : MP20-FR167 ou Galant Granite");
 });
 let toastT;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2800); }
@@ -917,6 +1056,6 @@ bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
-  matchAll, matchManual, buildCsv, grab, detectText, recognize, readCodes, get DATA() { return DATA; },
+  matchAll, matchManual, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
   async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getEngine(); scanning = wantScan = true; reads = []; changed = true; loop(); },
 };
