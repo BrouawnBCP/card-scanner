@@ -539,3 +539,6 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .game-ico.op{border-radius:50%;background:#e8eefb;padding:1px}
 /* version picker: picture of each version */
 .pick-img{width:34px;height:48px;object-fit:cover;border-radius:4px;flex:none;background:var(--surface)}
+/* four games */
+.scan-modes .game-mode .seg{width:38px;padding:6px 2px}
+.scan-modes .game-mode{flex:0 1 auto}

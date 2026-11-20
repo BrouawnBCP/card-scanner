@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "47";
+const APP_VERSION = "48";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -64,6 +64,7 @@ async function loadSessions() {
     try { localStorage.removeItem("cs-sessions"); localStorage.removeItem("cs-items"); } catch {}
   } catch (e) { console.warn("IndexedDB unavailable, staying on localStorage", e); idbBroken = true; }
   dataReady = true;
+  for (const g of Object.keys(GAMES)) if (GAMES[g].lazy && sessions.some((s) => s.items.some((it) => it.game === g))) ensureGame(g);
   renderList(); renderSessionBar(); renderLast(); if (view === "home") renderHome();
   scheduleSync(300);
 }
@@ -100,6 +101,8 @@ const GAMES = {
   ygo: { name: "Yu-Gi-Oh", cm: "YuGiOh" },
   rb: { name: "Riftbound", cm: "Riftbound", file: "riftbound.json", lang: "English", img: (u) => `${u}?w=160&fm=webp&accountingTag=RB` },
   op: { name: "One Piece", cm: "OnePiece", file: "onepiece.json", img: (u) => u },
+  // Pokémon: big database (4 MB), loaded only when the game is used
+  pk: { name: "Pokémon", cm: "Pokemon", file: "pokemon.json", lazy: true, img: (u) => `${u}/low.webp` },
 };
 const GAME_NAME = Object.fromEntries(Object.entries(GAMES).map(([k, v]) => [k, v.name]));
 const EXTRA = {}; // game -> loaded database
@@ -107,6 +110,9 @@ let game = GAMES[settings.game] ? settings.game : "ygo";
 const gameOf = (it) => (GAMES[it?.game] && it.game !== "ygo" ? it.game : "ygo");
 const dataFor = (g) => (g === "ygo" ? DATA : EXTRA[g] || null);
 let RB = null; // Riftbound database (kept as a name: its matcher uses it)
+const loading = {};
+/** Load a game's database once (lazy games: when first chosen, or when a list holds its cards). */
+function ensureGame(g) { if (GAMES[g]?.file && !EXTRA[g] && !loading[g]) loading[g] = loadGame(g); return loading[g]; }
 async function loadGame(g) {
   try {
     EXTRA[g] = await (await fetch("data/" + GAMES[g].file)).json();
@@ -115,7 +121,7 @@ async function loadGame(g) {
   } catch (e) { console.warn(GAMES[g].name + " data unavailable", e); }
 }
 async function loadData() {
-  for (const g of Object.keys(GAMES)) if (GAMES[g].file) loadGame(g);
+  for (const g of Object.keys(GAMES)) if (GAMES[g].file && (!GAMES[g].lazy || game === g)) ensureGame(g);
   try {
     const r = await fetch("data/cards.json");
     DATA = await r.json();
@@ -152,7 +158,8 @@ function applyCandidate(it, c) {
 /** Build an item from a matched code {key, code, region}. */
 function makeItem(m, extra = {}) {
   const g = GAMES[m.game] ? m.game : "ygo";
-  const cands = candidatesFor(m.key, g);
+  let cands = candidatesFor(m.key, g);
+  if (m.cards) { const f = cands.filter((c) => m.cards.includes(c.card)); if (f.length) cands = f; }
   const it = {
     id: uid(), createdAt: Date.now(), key: m.key, code: m.code, prefix: m.key.split("-")[0], cn: m.key.split("-")[1],
     // Riftbound cards are printed in English unless the code line says otherwise
@@ -284,7 +291,43 @@ function matchOnePiece(text) {
   }
   return out;
 }
+/* ----- Pokémon: "PBL FR 071/084" (2023 onwards) or "21/149" (older cards: the name tells sets apart) ----- */
+const foldName = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]/g, "");
+function matchPokemon(text) {
+  const D = EXTRA.pk; if (!D) return [];
+  const out = [], s = String(text).toUpperCase().replace(/[|]/g, "/");
+  for (const nm of s.matchAll(/(?<![0-9])([0-9OIL]{1,3})\s*\/\s*([0-9OIL]{2,4})/g)) {
+    // the set code is the word just before the number ("PBLFR", "PBLN", "30C")
+    const mm = [null, (s.slice(0, nm.index).trimEnd().match(/([A-Z0-9]{2,7})$/) || [])[1], nm[1], nm[2]];
+    const fix = (x) => x.replace(/[OI]/g, (c) => (c === "O" ? "0" : "1")).replace(/L/g, "1");
+    const num = parseInt(fix(mm[2]), 10), totRaw = fix(mm[3]);
+    // set code just before the number ("PBLFR", "PBLR", "30C"): try its first 2 to 4 characters
+    if (mm[1]) for (let k = 4; k >= 2; k--) {
+      const key = `${mm[1].slice(0, k)}-${String(num).padStart(3, "0")}`;
+      // a real set code: the number after the slash is that set's size (rejects stray words read before the number)
+      const same = [totRaw, totRaw.slice(0, 3), totRaw.slice(0, 2)].some((t) => (D.prints[`${num}/${parseInt(t, 10)}`] || []).some((e) => (D.prints[key] || []).some((x) => x[0] === e[0])));
+      if (D.prints[key] && same) { const lang = (mm[1].slice(k).match(/^(FR|EN|DE|IT|ES|PT)/) || [])[1] || ""; out.push({ key, code: `${mm[1].slice(0, k)} ${String(num).padStart(3, "0")}`, region: lang, game: "pk", exact: true, unsure: false }); break; }
+    }
+    if (out.length) break;
+    // "27/1240": OCR may add a character after the set size
+    for (const tot of [totRaw, totRaw.slice(0, 3), totRaw.slice(0, 2)]) {
+      const key = `${num}/${parseInt(tot, 10)}`;
+      if (D.prints[key]) { out.push({ key, code: `${String(num).padStart(tot.length, "0")}/${tot}`, region: "", game: "pk", exact: true, unsure: false, needName: D.prints[key].length > 1 }); break; }
+    }
+    if (out.length) break;
+  }
+  return out;
+}
+/** Several sets share "21/149": keep the ones whose name (French or English) was read on the card. */
+function pickByName(key, texts) {
+  const D = EXTRA.pk, list = D.prints[key] || [];
+  const read = texts.map(foldName).filter((t) => t.length >= 3);
+  const score = (e) => { const [en, fr] = D.cards[e[0]]; let best = 0; for (const t of read) for (const n of [foldName(fr), foldName(en)]) if (n && (t.includes(n) || n.includes(t))) best = Math.max(best, Math.min(n.length, t.length)); return best; };
+  const sc = list.map(score), top = Math.max(0, ...sc);
+  return top ? list.filter((e, i) => sc[i] === top).map((e) => e[0]) : null;
+}
 function matchManual(raw) {
+  if (game === "pk") return matchPokemon(String(raw).toUpperCase().replace(/^([A-Z0-9]{2,4})[- ]+(\d{1,3})$/, (x, a, n) => `${a} ${n}/999`))[0] || matchPokemon(String(raw))[0] || null;
   if (game === "op") return matchOnePiece(String(raw))[0] || null;
   if (game === "rb") return matchRiftbound(String(raw).toUpperCase().replace(/^([A-Z]{3})-/, "$1 ").replace(/\s+/g, " ").replace(/^([A-Z]{3} [A-Z]{0,2}\d+[A-Z*]?)$/, (x) => { const [setc] = x.split(" "); return `${x}/${RB?.totals[setc] || ""}`; }))[0] || null;
   const s = String(raw).toUpperCase().replace(/\s+/g, "");
@@ -609,6 +652,7 @@ function showHint(kind) {
   const box = $("scanHint");
   if (!kind) { box.hidden = true; return; }
   const [title, text] = kind === "nocode" && game === "rb" ? ["Code illisible", "Vérifie que le code en bas à gauche de la carte (ex. VEN · 136a/166) est bien visible : pas de doigt ni de reflet dessus."]
+    : kind === "nocode" && game === "pk" ? ["Numéro illisible", "Vérifie que le numéro en bas de la carte (ex. 21/149 ou PBL FR 071/084) est bien visible : pas de doigt ni de reflet dessus."]
     : kind === "nocode" && game === "op" ? ["Code illisible", "Vérifie que le code en bas à droite de la carte (ex. OP12-118) est bien visible : pas de doigt ni de reflet dessus."] : HINTS[kind];
   box.innerHTML = `<span class="hint-ico">${ico(kind === "dark" ? "flash" : kind === "far" || kind === "close" ? "scan" : "card")}</span><div><strong>${esc(title)}</strong><span>${esc(text)}</span></div>`;
   box.hidden = false;
@@ -634,6 +678,7 @@ async function scanFrame() {
   }
   if (game === "rb") return scanRiftbound(r, sig);
   if (game === "op") return scanOnePiece(r, sig);
+  if (game === "pk") return scanPokemon(r, sig);
   const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
   const zw = Math.min(video.videoWidth - zx, r.w * LOWER.w), zh = Math.min(video.videoHeight - zy, r.h * LOWER.h);
   const zone = grab(video, zx, zy, zw, zh, 960);
@@ -743,6 +788,45 @@ async function scanOnePiece(r, sig) {
   if (!(m.exact || hits >= 2)) { setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`); return; }
   const shot = camMode === "photo" ? capturePhoto(r) : null;
   m.region = await readOnePieceLang(r);
+  const it = makeItem(m);
+  commit(it, "scan");
+  if (shot) attachPhoto(shot, it, lastAdded?.id);
+  last = { sig, key: m.key, itemId: lastAdded?.id, edPending: 0 };
+  changed = false; changedHits = 0; reads = []; sawEmpty = false;
+  celebrate(it);
+  setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span> ${esc(it.nameFR)}${addedPrice(it)}`);
+}
+/* ----- Pokémon: number at the bottom (left on recent cards, right on the oldest); name at the top when needed ----- */
+async function scanPokemon(r, sig) {
+  if (!EXTRA.pk) { ensureGame("pk"); setStatus("La base Pokémon charge…"); await sleep(500); return; }
+  const zx = Math.max(0, r.x - r.w * 0.03), zy = Math.max(0, r.y + r.h * 0.84);
+  const zw = Math.min(video.videoWidth - zx, r.w * 1.06), zh = Math.min(video.videoHeight - zy, r.h * 0.2);
+  const zone = grab(video, zx, zy, zw, zh, 1280);
+  // the number is a short line: short lines first, effect text (long lines) last
+  const prefer = (b) => (b.w / zone.width > 0.4 ? 1 : 0) - ((b.y + b.h) / zone.height) * 0.3;
+  const token = loopToken;
+  const res = await readCodes(zone, { prefer, maxLines: 7, match: matchPokemon });
+  if (!scanning || token !== loopToken) return;
+  if (settings.debug) showDebug(zone, res, r);
+  const m = res.matches[0] || null;
+  reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
+  if (!m) {
+    if (!res.boxes.length || res.lines.every((l) => !l.text)) sawEmpty = true;
+    setStatus("Recherche du numéro…");
+    if (++failStreak >= 3) showHint(diagnose(zone, res, 0));
+    return;
+  }
+  failStreak = 0; showHint(null);
+  if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); changed = false; last.sig = sig; return; }
+  const hits = reads.filter((k) => k === m.key).length;
+  if (hits < 2) { setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`); return; } // numbers are short: read twice
+  const shot = camMode === "photo" ? capturePhoto(r) : null;
+  if (m.needName) { // the same number exists in several sets: read the name at the top of the card
+    const top = grab(video, r.x, r.y, r.w, r.h * 0.15, 960), texts = [];
+    for (const b of (await detectText(top)).filter((b) => b.w > b.h * 1.5).slice(0, 4)) texts.push(await recognize(top, b));
+    m.cards = pickByName(m.key, texts);
+  }
+  if (!m.region) m.region = REGION_OF[settings.lang] || "";
   const it = makeItem(m);
   commit(it, "scan");
   if (shot) attachPhoto(shot, it, lastAdded?.id);
@@ -957,7 +1041,7 @@ function setRarity(it, rarity) {
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
 /** eBay France search on the printed set code (MP20-FR167): finds that exact print and language. */
-const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""}` : it.code || it.nameEN || "")}`;
+const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""}` : gameOf(it) === "pk" ? `Pokemon ${it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "")}`;
 /** Cardmarket and eBay logo buttons. */
 const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
   + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`
@@ -1712,7 +1796,8 @@ $("startBtn").addEventListener("click", () => {
 /* ================= photo mode: pictures of cards for listings ================= */
 function renderGame() {
   $("gameMode").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b.dataset.game === game));
-  $("manualCode").placeholder = game === "rb" ? "Code, ex. VEN-136a" : game === "op" ? "Code, ex. OP12-118" : "Code ou nom de carte";
+  $("manualCode").placeholder = game === "rb" ? "Code, ex. VEN-136a" : game === "op" ? "Code, ex. OP12-118" : game === "pk" ? "Numéro, ex. 21/149 ou PBL 071" : "Code ou nom de carte";
+  ensureGame(game);
 }
 $("gameMode").addEventListener("click", (e) => {
   const b = e.target.closest("[data-game]"); if (!b || b.dataset.game === game) return;
@@ -1934,6 +2019,7 @@ $("manualForm").addEventListener("submit", (e) => {
   if (m) { $("manualCode").value = ""; showSuggest(""); commit(makeItem(m), "manual"); return; }
   if (game === "rb") { toast("Code Riftbound non reconnu. Exemple : VEN-136a ou SFD 087/221"); return; }
   if (game === "op") { toast("Code One Piece non reconnu. Exemple : OP12-118 ou ST01-001"); return; }
+  if (game === "pk") { toast("Numéro Pokémon non reconnu. Exemple : 21/149 ou PBL 071"); return; }
   const hits = looksLikeCode(v) ? [] : searchNames(v);
   if (hits.length === 1) return suggestPrints(hits[0]);
   if (hits.length) return suggestCards(v);
@@ -2156,6 +2242,6 @@ bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
-  matchAll, matchManual, matchRiftbound, matchOnePiece, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
+  matchAll, matchManual, matchRiftbound, matchOnePiece, matchPokemon, pickByName, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
   async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getEngine(); scanning = wantScan = true; reads = []; changed = true; loop(); },
 };

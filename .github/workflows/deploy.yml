@@ -39,6 +39,11 @@ jobs:
           python tools/build_onepiece.py --out app/data/onepiece.json || \
             curl -fsSL "https://brouawnbcp.github.io/card-scanner/data/onepiece.json" -o app/data/onepiece.json || \
             echo "Base One Piece indisponible ce soir"
+      - name: Construire la base Pokémon
+        run: |
+          python tools/build_pokemon.py --out app/data/pokemon.json || \
+            curl -fsSL "https://brouawnbcp.github.io/card-scanner/data/pokemon.json" -o app/data/pokemon.json || \
+            echo "Base Pokémon indisponible ce soir"
 
       # Les vignettes sont stockées sur une branche à part : chaque image n'est téléchargée
       # qu'une seule fois chez YGOPRODeck, comme ils le demandent.
