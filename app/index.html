@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
 
@@ -149,6 +149,10 @@
       <div class="muted small">Diagnostic : ce que lit le scanner</div>
       <canvas id="debugCanvas"></canvas>
       <pre id="debugText"></pre>
+      <div id="debugEd" hidden>
+        <canvas id="debugEdCanvas"></canvas>
+        <pre id="debugEdText"></pre>
+      </div>
     </div>
   </section>
 
@@ -327,6 +331,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=17"></script>
+<script type="module" src="app.js?v=18"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
-/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "17";
+﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "18";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -416,7 +416,16 @@ async function scanFrame() {
     // The card just added is still in front of the camera: only watch (cheaply) for it to move away.
     if (sigDiff(sig, last.sig) > 22) { if (++changedHits >= 2) { changed = true; reads = []; sawEmpty = false; setStatus("Recherche du code…"); } }
     else changedHits = 0;
-    if (!changed) { await sleep(120); return; }
+    if (!changed) {
+      // …and look a few more times for a "1st Edition" mention missed on the first read
+      if (last.edPending > 0 && last.itemId) {
+        last.edPending--;
+        const token = loopToken;
+        const ed = await readEdition(r, r.y + r.h * last.edFrom);
+        if (token === loopToken && ed.ed) { last.edPending = 0; markFirstEd(last.itemId); }
+      } else await sleep(120);
+      return;
+    }
   }
   const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
   const zw = Math.min(video.videoWidth - zx, r.w * LOWER.w), zh = Math.min(video.videoHeight - zy, r.h * LOWER.h);
@@ -435,21 +444,64 @@ async function scanFrame() {
   if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); changed = false; last.sig = sig; return; }
   const hits = reads.filter((k) => k === m.key).length;
   if (m.exact || hits >= 2) {
-    const firstEd = await detectEdition(zone, res.boxes, textH);
-    const it = makeItem(m, { firstEd });
+    // The edition mention is the lowest line on the left, below the code line: read that strip on its own.
+    const line = res.lines.find((l) => l.matches.some((x) => x.key === m.key));
+    const fromY = line ? zy + (line.box.y + line.box.h) / k : r.y + r.h * 0.76;
+    const ed = await readEdition(r, fromY);
+    const it = makeItem(m, { firstEd: ed.ed === true });
     commit(it, "scan");
-    last = { sig, key: m.key }; changed = false; changedHits = 0; reads = []; sawEmpty = false;
+    last = { sig, key: m.key, itemId: lastAdded?.id, edPending: ed.ed ? 0 : 3, edFrom: (fromY - r.y) / r.h };
+    changed = false; changedHits = 0; reads = []; sawEmpty = false;
     celebrate(it);
-    setStatus(`Ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`);
+    setStatus(`Ajoutée : <span class="code">${esc(m.code)}</span>${ed.ed ? " · 1re édition" : ""} — présente la suivante`);
   } else setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`);
 }
-async function detectEdition(zone, boxes, textH) {
+/* ----- "1st Edition" mention: printed bottom-left, next to the 8-digit passcode ----- */
+// 1st Edition · 1re/1ère Édition · 1. Auflage · 1a Edizione · 1a Edición · 1ª Edição — never "Limited Edition".
+function isEditionText(t) {
+  const s = String(t).toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]/g, "");
+  if (!s || /limit|imite|limita/.test(s)) return false; // Limited Edition / Édition Limitée / Edizione Limitata…
+  return /dition|auflage|edizion|edicion|edicao|1st|1re|1ere/.test(s);
+}
+async function readEdition(r, fromY) {
   try {
-    const cands = boxes.filter((b) => b.y > zone.height * 0.7 && b.x < zone.width * 0.5 && b.h < textH * 4.5)
-      .sort((a, b) => b.y - a.y).slice(0, 3);
-    for (const b of cands) if (/EDI[TC]|DITION|AUFLAGE|EDIZ|1ST|1RE|1\.?\s?A/i.test(await recognize(zone, b))) return true;
-  } catch {}
-  return false;
+    const x0 = Math.max(0, r.x - r.w * 0.03), w = Math.min(video.videoWidth - x0, r.w * 0.62);
+    const y0 = Math.max(0, fromY), y1 = Math.min(video.videoHeight, r.y + r.h * 1.06);
+    if (y1 - y0 < r.h * 0.05) return { ed: null, text: "" };
+    const strip = grab(video, x0, y0, w, y1 - y0, 1280); // full resolution: the mention is tiny
+    const boxes = (await detectText(strip))
+      .filter((b) => b.w > b.h * 1.8 && b.x < strip.width * 0.55)
+      .sort((a, b) => (b.y + b.h) - (a.y + a.h)).slice(0, 3);   // lowest lines first
+    const texts = [];
+    for (const b of boxes) {
+      const t = await recognize(strip, b); texts.push(t);
+      if (isEditionText(t)) { debugEdition(strip, texts, true); return { ed: true, text: texts.join(" | ") }; }
+    }
+    debugEdition(strip, texts, false);
+    return { ed: boxes.length ? false : null, text: texts.join(" | ") };
+  } catch (e) { console.warn(e); return { ed: null, text: "" }; }
+}
+function debugEdition(strip, texts, ed) {
+  if (!settings.debug) return;
+  const c = $("debugEdCanvas"); c.width = strip.width; c.height = strip.height; c.getContext("2d").drawImage(strip, 0, 0);
+  $("debugEdText").textContent = `Mention d'édition lue : ${texts.join(" ⏎ ") || "(aucun texte)"} → ${ed ? "1re édition ✔" : "non trouvée"}`;
+  $("debugEd").hidden = false;
+}
+/** A later read found "1st Edition" on the card just added: move one copy to its 1st-edition line. */
+function markFirstEd(id) {
+  const it = items.find((x) => x.id === id); if (!it || it.firstEd) return;
+  if (it.qty > 1) {
+    it.qty -= 1;
+    const copy = { ...JSON.parse(JSON.stringify(it)), id: uid(), qty: 1, firstEd: true, createdAt: Date.now() };
+    const twin = items.find((x) => x !== it && mergeKey(x) === mergeKey(copy));
+    if (twin) { twin.qty += 1; lastAdded = { id: twin.id, merged: true }; } else { items.unshift(copy); lastAdded = { id: copy.id, merged: false }; }
+  } else {
+    it.firstEd = true;
+    const twin = items.find((x) => x !== it && mergeKey(x) === mergeKey(it));
+    if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); lastAdded = { id: twin.id, merged: true }; }
+  }
+  if (last) last.itemId = lastAdded?.id;
+  saveItems(); renderLast(); toast("1re édition détectée");
 }
 function showDebug(zone, res, r) {
   const c = $("debugCanvas"); c.width = zone.width; c.height = zone.height;
