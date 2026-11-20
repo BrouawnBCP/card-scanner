@@ -163,6 +163,34 @@ input::placeholder{color:var(--faint)}
 .mini-select select{padding-top:20px;padding-bottom:6px;min-height:50px;font-size:14px;text-overflow:ellipsis}
 #listCount{margin:0}
 .title-input.static{margin:0;padding:6px 0;border:0}
+.title-box{flex:1;min-width:0;display:flex;align-items:center;gap:4px}
+.icon-btn.sm{width:36px;min-width:36px;height:36px;min-height:36px}
+.icon-btn.sm .ico{width:17px;height:17px}
+#selectBtn{flex:none}
+.selecting #selectBtn{background:var(--gold);color:var(--gold-ink);border-color:var(--gold)}
+.session-dates{margin:-6px 0 0}
+.chip.ebay{color:#9fc6ff}
+.scanned{margin:0}
+/* history */
+.view.hist .list-head,.view.hist .session-dates,.view.hist .stats,.view.hist .list-tools,.view.hist .list-filters,.view.hist #listCount,.view.hist #exportNote,.view.hist #list,.view.hist #empty,.view.hist #insights,.view.hist #wipeBtn{display:none!important}
+.history{display:flex;flex-direction:column;gap:8px}
+.hday{margin:10px 2px 0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.hrow{display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:6px}
+.hrow.on{border-color:var(--gold);background:linear-gradient(90deg,var(--gold-soft),var(--surface) 60%)}
+.hopen{flex:1;min-width:0;justify-content:flex-start;gap:12px;background:transparent;border:0;text-align:left;padding:6px;font-weight:400}
+.hopen .row-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.hopen .name{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hopen .meta{display:flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hopen .meta .ico{width:13px;height:13px}
+.hthumbs{display:flex;flex:none}
+.hthumbs .thumb{width:30px;height:44px;border-radius:4px}
+.hthumbs .thumb + .thumb{margin-left:-14px}
+.hthumbs .thumb .rar{display:none}
+.hacts{display:flex;flex-direction:column;gap:4px}
+.hacts .icon-btn{background:var(--surface-2)}
+.hacts .del-ico{color:var(--bad);font-size:11px;font-weight:700}
+.hrename{flex:1;display:flex;gap:6px;padding:4px}
+.hrename input{flex:1;min-width:0;min-height:42px}
 /* stock badges */
 .tag.stock{color:#8fc1ff;border-color:rgba(110,168,255,.4);background:rgba(110,168,255,.1)}
 .stock-pill{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;margin-top:4px;font-size:12px;font-weight:700;color:#8fc1ff;background:rgba(110,168,255,.12);border:1px solid rgba(110,168,255,.35);border-radius:999px;padding:3px 9px}

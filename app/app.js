@@ -1,5 +1,5 @@
-﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "19";
+/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "21";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -610,6 +610,8 @@ function setRarity(it, rarity) {
   const twin = items.find((x) => x !== it && mergeKey(x) === mergeKey(it));
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
+/** eBay France search on the printed set code (MP20-FR167): finds that exact print and language. */
+const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(it.code || it.nameEN || "")}`;
 // Cardmarket language ids (offer filter "language=").
 const CM_LANG = { English: 1, French: 2, German: 3, Spanish: 4, Italian: 5, Portuguese: 8 };
 /** Product page with offers filtered on the card's language; a name search when the exact product is unknown. */
@@ -682,6 +684,7 @@ function renderLast() {
       <button class="chip" data-act="plus">${ico("plus")} 1</button>
       <button class="chip" data-act="undo">${ico("undo")} Annuler</button>
       <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket ${LANG_SHORT[it.lang] || ""}</a>
+      <a class="chip ebay" href="${ebayLink(it)}" target="_blank" rel="noopener">${ico("ext")} eBay</a>
     </div>`;
 }
 $("last").addEventListener("click", (e) => {
@@ -755,10 +758,11 @@ $("stockClear").addEventListener("click", () => { STOCK = null; try { localStora
 const stockTag = (it) => { const s = stockOf(it); return s ? `<span class="tag stock" title="Déjà dans ton stock Cardmarket">stock ${s.n}</span>` : ""; };
 
 /* ----- "Ma collection": every session merged, one line per card version and language ----- */
+const colKey = (it) => [typeof it.cm === "number" && it.cm ? it.cm : it.key, it.rarity, it.lang, it.firstEd].join("|");
 function collection() {
   const map = new Map();
   for (const s of sessions) for (const it of s.items) {
-    const k = [typeof it.cm === "number" && it.cm ? it.cm : it.key, it.rarity, it.lang, it.firstEd].join("|");
+    const k = colKey(it);
     let e = map.get(k);
     if (!e) { e = { ...it, id: "col:" + k, qty: 0, createdAt: 0, sessionsIn: [] }; map.set(k, e); }
     e.qty += it.qty; e.createdAt = Math.max(e.createdAt, it.createdAt || 0);
@@ -791,6 +795,11 @@ function visibleItems(list) {
   return out;
 }
 function renderList() {
+  const curTotal0 = items.reduce((n, x) => n + x.qty, 0);
+  $("tabCount").textContent = curTotal0; $("tabCount").classList.toggle("zero", !curTotal0);
+  const hist = listMode === "history";
+  $("view-list").classList.toggle("hist", hist); $("history").hidden = !hist;
+  if (hist) { selecting = false; renderBulkBar(); renderHistory(); return; }
   const coll = listMode === "collection";
   const src = listSource();
   const total = src.reduce((n, x) => n + x.qty, 0);
@@ -799,9 +808,18 @@ function renderList() {
   const todo = src.filter((x) => !x.rarity).length;
   const curTotal = items.reduce((n, x) => n + x.qty, 0);
   $("tabCount").textContent = curTotal; $("tabCount").classList.toggle("zero", !curTotal);
-  $("sessionTitle").hidden = coll; $("collTitle").hidden = !coll;
-  $("selectBtn").hidden = coll; $("sessionsBtn").hidden = coll;
+  $("sessionTitle").closest(".title-box").hidden = coll; $("collTitle").hidden = !coll;
+  $("selectBtn").querySelector("span").textContent = selecting ? "Terminer" : "Sélectionner";
   if (!coll && document.activeElement !== $("sessionTitle")) $("sessionTitle").value = current.name;
+  $("sessionDates").hidden = coll;
+  if (!coll) {
+    const fmt = (t, o) => new Date(t).toLocaleString("fr-FR", o);
+    const lastScan = items.reduce((m, x) => Math.max(m, x.createdAt || 0), 0);
+    $("sessionDates").textContent = `Commencée le ${fmt(current.createdAt, { weekday: "long", day: "numeric", month: "long" })} à ${fmt(current.createdAt, { hour: "2-digit", minute: "2-digit" })}`
+      + (lastScan ? ` · dernier ajout le ${fmt(lastScan, { day: "numeric", month: "short" })} à ${fmt(lastScan, { hour: "2-digit", minute: "2-digit" })}` : "");
+  }
+  $("wipeBtn").hidden = !src.length;
+  $("wipeBtn").querySelector("span").textContent = wipeArmed ? (coll ? "Confirmer : tout supprimer ?" : "Confirmer : vider la session ?") : (coll ? `Tout supprimer (${total} carte${total > 1 ? "s" : ""}, toutes sessions)` : "Vider cette session");
   $("statCards").textContent = total;
   $("statValue").textContent = priced ? eur(value).replace(/\s?€/, " €") : "—";
   $("statValueL").textContent = priced && priced < total ? `cote (${priced}/${total})` : "cote estimée";
@@ -843,10 +861,12 @@ function editPanel(it) {
     <label>Prix de vente<input data-f="price" inputmode="decimal" placeholder="€" value="${esc(it.price)}"></label>
     <label>Commentaire<input data-f="comment" placeholder="—" value="${esc(it.comment)}"></label>
     ${stockLine(it)}
+    <p class="full muted small scanned">Scannée le ${new Date(it.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} à ${new Date(it.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
     <div class="edit-row full">
       <span class="qty"><button data-act="minus" aria-label="Retirer un exemplaire">${ico("minus")}</button><span>${it.qty}</span><button data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")}</button></span>
       <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
       <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket</a>
+      <a class="chip ebay" href="${ebayLink(it)}" target="_blank" rel="noopener">${ico("ext")} eBay</a>
       <button class="del" data-act="del" aria-label="Supprimer">${ico("trash")}</button>
     </div>
   </div>`;
@@ -860,7 +880,7 @@ function collDetail(it) {
     ${stockLine(it)}
     <p class="full muted small">Présente dans ${it.sessionsIn.length} session${it.sessionsIn.length > 1 ? "s" : ""} :</p>
     ${it.sessionsIn.map(({ s, qty }) => `<button class="sess-link full" data-act="opensession" data-sid="${s.id}"><span>${esc(s.name)}</span><span class="tag qty">×${qty}</span>${ico("chev")}</button>`).join("")}
-    <a class="chip full-w" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Voir sur Cardmarket</a>
+    <div class="edit-row"><a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Voir sur Cardmarket</a><a class="chip ebay" href="${ebayLink(it)}" target="_blank" rel="noopener">${ico("ext")} eBay</a></div>
   </div>`;
 }
 const itemOf = (el) => items.find((x) => x.id === el.closest("[data-id]")?.dataset.id);
@@ -898,14 +918,98 @@ $("listMode").addEventListener("click", (e) => { const b = e.target.closest("[da
 
 /* ----- grouped actions ----- */
 $("selectBtn").addEventListener("click", () => { selecting = !selecting; selected.clear(); openId = null; renderList(); });
+/** Remove matching cards from every session (used from "Ma collection"). */
+function removeFromAllSessions(match) {
+  for (const s of sessions) {
+    const kept = s.items.filter((it) => !match(it));
+    if (kept.length !== s.items.length) { s.items = kept; s.updatedAt = Date.now(); }
+  }
+  items = current.items;
+  if (lastAdded && !items.some((x) => x.id === lastAdded.id)) lastAdded = null;
+}
+/* ----- "Vider cette session" / "Tout supprimer" ----- */
+let wipeArmed = 0;
+$("wipeBtn").addEventListener("click", () => {
+  const coll = listMode === "collection";
+  if (Date.now() - wipeArmed > 4000) { wipeArmed = Date.now(); renderList(); setTimeout(() => { if (wipeArmed && Date.now() - wipeArmed >= 4000) { wipeArmed = 0; renderList(); } }, 4100); return; }
+  wipeArmed = 0;
+  if (coll) {
+    const n = sessions.length;
+    const dead = store.get("cs-deleted", []); for (const s of sessions) dead.push({ id: s.id, at: Date.now() }); store.set("cs-deleted", dead);
+    sessions = [newSession()]; switchSession(sessions[0]);
+    toast(`Tout supprimé (${n} session${n > 1 ? "s" : ""})`);
+  } else {
+    items = []; lastAdded = null; saveItems(); renderLast(); toast("Session vidée");
+  }
+});
+$("renameBtn").addEventListener("click", () => { const i = $("sessionTitle"); i.focus(); i.select(); });
+$("sessionTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+
+/* ----- Historique: every session, newest first, grouped by day ----- */
+let histRename = null, histDel = null;
+function dayLabel(t) {
+  const d = new Date(t), today = new Date(); const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(today) - day(d)) / 86400000);
+  if (diff === 0) return "Aujourd'hui";
+  if (diff === 1) return "Hier";
+  return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+function renderHistory() {
+  const sorted = [...sessions].sort((a, b) => b.createdAt - a.createdAt);
+  let html = `<button class="btn primary wide" data-h="new">${ico("plus")} Nouvelle session</button>`, lastDay = "";
+  for (const s of sorted) {
+    const day = dayLabel(s.createdAt);
+    if (day !== lastDay) { html += `<h3 class="hday">${esc(day.charAt(0).toUpperCase() + day.slice(1))}</h3>`; lastDay = day; }
+    const { n, v } = sessionStats(s), cur = s === current;
+    const start = new Date(s.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    const lastScan = s.items.reduce((m, x) => Math.max(m, x.createdAt || 0), 0);
+    const end = lastScan && lastScan - s.createdAt > 60000 ? ` → ${new Date(lastScan).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "";
+    const thumbs = [...s.items].sort((a, b) => unitPrice(b) - unitPrice(a)).slice(0, 3).map((it) => thumb(it)).join("");
+    html += `<div class="hrow ${cur ? "on" : ""}" data-sid="${s.id}">
+      ${histRename === s.id
+        ? `<form class="hrename" data-h="renameform"><input value="${esc(s.name)}" maxlength="60" aria-label="Nouveau nom"><button class="btn primary small" type="submit">OK</button></form>`
+        : `<button class="hopen" data-h="open">
+            <span class="hthumbs">${thumbs || `<span class="thumb"></span>`}</span>
+            <span class="row-text"><span class="name">${esc(s.name)}</span>
+              <span class="meta">${ico("clock")} ${start}${end} · ${n} carte${n > 1 ? "s" : ""}${v ? ` · ≈ ${esc(eur(v))}` : ""}</span></span>
+            ${cur ? `<span class="tag qty">en cours</span>` : ""}
+          </button>
+          <div class="hacts">
+            <button class="icon-btn sm" data-h="rename" aria-label="Renommer">${ico("pencil")}</button>
+            <button class="icon-btn sm del-ico" data-h="del" aria-label="Supprimer">${histDel === s.id ? "OK ?" : ico("trash")}</button>
+          </div>`}
+    </div>`;
+  }
+  $("history").innerHTML = html;
+  const inp = $("history").querySelector(".hrename input"); if (inp) { inp.focus(); inp.select(); }
+}
+$("history").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-h]"); if (!b || b.tagName === "FORM") return;
+  if (b.dataset.h === "new") { startNewSession(); if (!items.length) setListMode("session"); return; }
+  const s = sessions.find((x) => x.id === b.closest("[data-sid]")?.dataset.sid); if (!s) return;
+  if (b.dataset.h === "open") { switchSession(s); setListMode("session"); return; }
+  if (b.dataset.h === "rename") { histRename = s.id; histDel = null; renderHistory(); return; }
+  if (b.dataset.h === "del") {
+    if (histDel !== s.id) { histDel = s.id; renderHistory(); setTimeout(() => { if (histDel === s.id) { histDel = null; renderHistory(); } }, 4000); return; }
+    histDel = null; deleteSession(s); renderHistory(); toast("Session supprimée");
+  }
+});
+$("history").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const s = sessions.find((x) => x.id === e.target.closest("[data-sid]")?.dataset.sid);
+  const v = e.target.querySelector("input").value.trim();
+  histRename = null;
+  if (s && v) { s.name = v; s.updatedAt = Date.now(); saveItems(); toast("Session renommée"); }
+  renderHistory();
+});
 function renderBulkBar() {
-  const on = selecting && listMode === "session";
+  const on = selecting && listMode !== "history";
   $("bulkBar").hidden = !on; document.body.classList.toggle("bulk-on", on);
   if (!on) return;
-  const n = selected.size;
+  const n = selected.size, coll = listMode === "collection";
   $("bulkCount").textContent = `${n} sélectionnée${n > 1 ? "s" : ""}`;
-  $("bulkBar").querySelectorAll(".bulk-actions button").forEach((b) => (b.disabled = !n));
-  $("bulkBar").querySelector('[data-bulk="all"]').textContent = n && n === visibleItems(items).length ? "Aucune" : "Tout";
+  $("bulkBar").querySelectorAll(".bulk-actions button").forEach((b) => { b.disabled = !n; b.hidden = coll && b.dataset.bulk !== "del"; });
+  $("bulkBar").querySelector('[data-bulk="all"]').textContent = n && n === visibleItems(listSource()).length ? "Aucune" : "Tout";
 }
 const picked = () => items.filter((x) => selected.has(x.id));
 function openBulk(title, html) { $("bulkTitle").textContent = title; $("bulkBody").innerHTML = html; $("bulkSheet").hidden = false; }
@@ -916,7 +1020,7 @@ $("bulkBar").addEventListener("click", (e) => {
   const b = e.target.closest("[data-bulk]"); if (!b) return;
   const n = selected.size, act = b.dataset.bulk;
   if (act === "done") { selecting = false; selected.clear(); renderList(); return; }
-  if (act === "all") { const vis = visibleItems(items); if (n && n === vis.length) selected.clear(); else vis.forEach((x) => selected.add(x.id)); renderList(); return; }
+  if (act === "all") { const vis = visibleItems(listSource()); if (n && n === vis.length) selected.clear(); else vis.forEach((x) => selected.add(x.id)); renderList(); return; }
   if (!n) return;
   if (act === "cond") openBulk(`État de ${n} carte${n > 1 ? "s" : ""}`, `<div class="chips big">${COND.map((c) => `<button class="chip" data-set-cond="${c}">${c}</button>`).join("")}</div>`);
   if (act === "comment") openBulk(`Commentaire de ${n} carte${n > 1 ? "s" : ""}`, `<form id="bulkCommentForm" class="acc-form"><input id="bulkComment" placeholder="ex. CM40-01 (vide pour effacer)"><button class="btn primary wide" type="submit">Appliquer</button></form>`);
@@ -924,7 +1028,9 @@ $("bulkBar").addEventListener("click", (e) => {
   if (act === "del") {
     if (Date.now() - bulkDelArmed > 4000) { bulkDelArmed = Date.now(); b.querySelector("span").textContent = "Confirmer ?"; setTimeout(() => (b.querySelector("span").textContent = "Supprimer"), 4000); return; }
     bulkDelArmed = 0; b.querySelector("span").textContent = "Supprimer";
-    items = items.filter((x) => !selected.has(x.id)); endBulk(`${n} carte${n > 1 ? "s" : ""} supprimée${n > 1 ? "s" : ""}`);
+    if (listMode === "collection") removeFromAllSessions((it) => selected.has("col:" + colKey(it)));
+    else items = items.filter((x) => !selected.has(x.id));
+    endBulk(`${n} ligne${n > 1 ? "s" : ""} supprimée${n > 1 ? "s" : ""}`);
   }
 });
 $("bulkClose").addEventListener("click", closeBulk);
@@ -1014,7 +1120,6 @@ function renderSessions() {
   }).join("");
 }
 function openSheet() { delArmed = null; renderSessions(); $("sheet").hidden = false; }
-$("sessionsBtn").addEventListener("click", openSheet);
 $("sessionBar").addEventListener("click", (e) => { if (!e.target.closest("#newSessionBtn")) openSheet(); });
 $("newSessionBtn").addEventListener("click", startNewSession);
 $("sheetNew").addEventListener("click", () => { startNewSession(); $("sheet").hidden = true; });
