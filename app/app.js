@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "43";
+const APP_VERSION = "44";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -833,9 +833,38 @@ function commit(it, source) {
   else { items.unshift(it); lastAdded = { id: it.id, merged: false }; }
   saveItems(); renderLast();
   if (source === "manual") toast(`${(twin || it).nameFR} ajoutée`);
+  if (source === "scan" || source === "manual") askVersion(lastAdded.id);
 }
+/* ----- several versions under the same code (e.g. RA05-FR070): ask which one, right when it is scanned ----- */
+const pricePlain = (p) => !p ? "—" : p.lo === p.hi ? eur(p.lo) : `${num(p.lo)}–${num(p.hi)} €`;
+function askVersion(id) {
+  const box = $("pick"), it = items.find((x) => x.id === id);
+  if (!it || it.rarity || (it.cands || []).length < 2) { box.hidden = true; return; }
+  box.dataset.id = id;
+  // prices per version when Cardmarket tells them apart; otherwise one range for all
+  const prices = it.cands.map((c) => pricePlain(cmPrice(c.cm))), same = prices.every((p) => p === prices[0]);
+  box.innerHTML = `<div class="pick-card" role="dialog" aria-label="Choisir la version">
+    <p class="pick-title">Plusieurs versions : laquelle ?</p>
+    <p class="pick-name">${esc(it.nameFR)} · <span class="code">${esc(it.code)}</span>${same && prices[0] !== "—" ? `<br>Cote : ${esc(prices[0])} selon la version` : ""}</p>
+    <div class="pick-list">${it.cands.map((c, i) => `<button type="button" class="pick-opt" data-i="${i}">${rarBadge(c.rarity)}<span class="pick-rar">${esc(c.rarity)}</span>${same ? "" : `<span class="pick-price">${esc(prices[i])}</span>`}</button>`).join("")}</div>
+    <button type="button" class="pick-later" data-later="1">Choisir plus tard</button></div>`;
+  box.hidden = false;
+}
+$("pick").addEventListener("click", (e) => {
+  const box = $("pick"), b = e.target.closest("button"); if (!b) return;
+  const it = items.find((x) => x.id === box.dataset.id);
+  box.hidden = true;
+  if (b.dataset.later || !it) { if (it) toast("À choisir plus tard (carte « à vérifier »)"); return; }
+  const c = it.cands[Number(b.dataset.i)]; if (!c) return;
+  applyCandidate(it, c);
+  const twin = items.find((x) => x !== it && mergeKey(x) === mergeKey(it));
+  if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
+  saveItems(); renderLast();
+  toast(`${c.rarity} enregistrée`);
+});
 function undoLast() {
   if (!lastAdded) return;
+  $("pick").hidden = true;
   const it = items.find((x) => x.id === lastAdded.id);
   if (it) { if (lastAdded.merged && it.qty > 1) it.qty -= 1; else items = items.filter((x) => x.id !== it.id); }
   lastAdded = null; saveItems(); renderLast(); toast("Dernier ajout annulé");

@@ -520,3 +520,15 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 #view-scan .stage.live .scanline{opacity:.6;animation:glide 3.2s cubic-bezier(.45,0,.55,1) infinite alternate}
 @keyframes glide{from{transform:translateY(0)}to{transform:translateY(100%)}}
 @media (prefers-reduced-motion:reduce){#view-scan .stage.live .scanline{animation:none;transform:translateY(50%)}}
+/* version picker shown on the camera when a code has several versions */
+.vpick{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(3,4,10,.55)}
+.pick-card{width:100%;max-width:340px;max-height:100%;overflow:auto;background:#0b0e1f;border:1px solid rgba(120,170,255,.28);border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:10px;box-shadow:0 18px 50px rgba(0,0,0,.55);animation:rise .22s ease-out}
+.pick-title{margin:0;font-weight:750;font-size:16px}
+.pick-name{margin:0;font-size:13px;color:var(--muted);line-height:1.35}
+.pick-name .code{font-family:var(--f-mono);color:var(--gold)}
+.pick-list{display:flex;flex-direction:column;gap:6px}
+.pick-opt{justify-content:flex-start;gap:10px;min-height:48px;padding:8px 12px;text-align:left;background:var(--surface-2);border-color:var(--line-2)}
+.pick-opt .rar{position:static;flex:none}
+.pick-rar{flex:1;font-weight:650;font-size:14px;line-height:1.25}
+.pick-price{flex:none;font:700 14px var(--f-mono);color:var(--ink)}
+.pick-later{background:transparent;border:0;color:var(--muted);font-size:14px;min-height:40px;text-decoration:underline;text-underline-offset:3px}
