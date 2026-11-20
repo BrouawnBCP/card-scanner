@@ -13,17 +13,24 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <main>
   <!-- ===== Scanner view ===== -->
   <section id="view-scan" class="view">
+    <div class="sessionbar" id="sessionBar" role="button" tabindex="0" aria-label="Voir mes sessions">
+      <div class="sb-text">
+        <span class="sb-label">Session en cours</span>
+        <span class="sb-name" id="sessionName">—</span>
+      </div>
+      <span class="sb-count" id="sessionCount">0 carte</span>
+      <button class="btn small" id="newSessionBtn" type="button">Nouvelle</button>
+    </div>
     <div class="stage" id="stage">
       <video id="video" playsinline muted autoplay></video>
       <div class="guide" id="guide" aria-hidden="true">
-        <div class="codezone"></div>
-        <span class="guide-hint">Code de set ici</span>
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
       </div>
       <div class="status" id="status" role="status">Appuie sur « Démarrer » pour lancer la caméra</div>
       <div class="stage-actions">
@@ -51,11 +58,12 @@
   <!-- ===== List view ===== -->
   <section id="view-list" class="view" hidden>
     <header class="list-head">
-      <div>
-        <h1>Ma liste</h1>
+      <div class="title-wrap">
+        <input id="sessionTitle" class="title-input" aria-label="Nom de la session" maxlength="60">
         <p class="muted" id="totals">0 carte</p>
       </div>
       <div class="head-actions">
+        <button class="btn" id="sessionsBtn">Sessions</button>
         <button class="btn primary" id="exportBtn">Exporter CSV</button>
       </div>
     </header>
@@ -84,7 +92,7 @@
         <label class="check"><input type="checkbox" id="setDebug"> Mode diagnostic (voir ce que lit le scanner)</label>
       </div>
       <p class="muted small" id="dataInfo"></p>
-      <button class="btn danger" id="clearBtn">Vider la liste</button>
+      <button class="btn danger" id="clearBtn">Supprimer cette session</button>
     </details>
   </section>
 </main>
@@ -94,9 +102,17 @@
   <button class="tab" data-view="list">Liste <span id="tabCount" class="badge">0</span></button>
 </nav>
 
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-label="Mes sessions">
+    <header><h2>Mes sessions</h2><button class="btn small" id="sheetClose">Fermer</button></header>
+    <div id="sessionList" class="slist"></div>
+    <button class="btn primary" id="sheetNew">Nouvelle session</button>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="vendor/ort/ort.min.js"></script>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "4";
+const APP_VERSION = "5";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -16,9 +16,29 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-let items = store.get("cs-items", []);
 const settings = Object.assign({ cond: "NM", lang: "French", comment: "", priceTrend: false, sound: true, debug: false }, store.get("cs-settings", {}));
-function saveItems() { if (!store.set("cs-items", items)) toast("Impossible d'enregistrer la liste sur ce téléphone. Exporte-la."); renderList(); }
+
+/* ----- sessions: one list per scanning session ----- */
+function newSession(itemsIn = []) {
+  const d = new Date();
+  return { id: uid(), createdAt: Date.now(), updatedAt: Date.now(), items: itemsIn,
+    name: `${d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` };
+}
+let sessions = store.get("cs-sessions", null);
+if (!Array.isArray(sessions) || !sessions.length) sessions = [newSession(store.get("cs-items", []))]; // migrate the single list of v1–v4
+let current = sessions.find((s) => s.id === store.get("cs-current", "")) || sessions[0];
+let items = current.items;
+function saveItems() {
+  current.items = items; current.updatedAt = Date.now();
+  if (!store.set("cs-sessions", sessions) || !store.set("cs-current", current.id)) toast("Impossible d'enregistrer sur ce téléphone. Exporte ta liste.");
+  renderList(); renderSessionBar();
+}
+function switchSession(s) { current = s; items = s.items; lastAdded = null; saveItems(); renderLast(); }
+function startNewSession() {
+  if (!items.length) { toast("Cette session est encore vide : continue de scanner dedans."); return; }
+  const s = newSession(); sessions.unshift(s); switchSession(s);
+  toast("Nouvelle session commencée"); bump($("sessionBar"));
+}
 navigator.storage?.persist?.().catch(() => {});
 
 /* ================= card data ================= */
@@ -87,16 +107,19 @@ function prefixVariants(p) {
 const L2DS = { O: ["0"], Q: ["0"], D: ["0"], U: ["0"], I: ["1"], L: ["1"], J: ["1"], T: ["7"], Z: ["2", "7"], S: ["5"], B: ["8"], G: ["6"], A: ["4"] };
 function parseSuffix(s) {
   if (s.length < 3 || s.length > 6) return null;
-  let nums = [""];
+  let nums = [""], clean = true;
   for (const c of s.slice(-3)) {
     const opts = /\d/.test(c) ? [c] : (L2DS[c] || []);
     if (!opts.length) return null;
+    if (!/\d/.test(c)) clean = false;
     nums = nums.flatMap((n) => opts.map((o) => n + o));
   }
-  let reg = s.slice(0, -3).replace(/\d/g, (c) => D2L[c] || "");
+  const raw = s.slice(0, -3);
+  let reg = raw.replace(/\d/g, (c) => D2L[c] || "");
   if (reg.length > 2) reg = reg.slice(-2);
   if (!REGION[reg] && REGION_FIX[reg]) reg = REGION_FIX[reg];
-  return { region: REGION[reg] ? reg : "", nums };
+  if (reg !== raw || !REGION[reg]) clean = false;
+  return { region: REGION[reg] ? reg : "", nums, clean };
 }
 function tryCode(pre, suf, out) {
   pre = pre.replace(/[^A-Z0-9]/g, ""); suf = suf.replace(/[^A-Z0-9]/g, "");
@@ -108,7 +131,9 @@ function tryCode(pre, suf, out) {
     if (DATA.prints[key]) found.push({ key, code: `${pv}-${sx.region}${n}`, region: sx.region });
   }
   // Several real codes fit the same blurry read: flag them so a single read never decides.
-  for (const f of found) if (!out.some((o) => o.key === f.key)) out.push({ ...f, unsure: found.length > 1 });
+  // "exact": read as printed, no character had to be corrected, so one read is enough.
+  for (const f of found) if (!out.some((o) => o.key === f.key))
+    out.push({ ...f, unsure: found.length > 1, exact: found.length === 1 && sx.clean && f.key.startsWith(pre + "-") });
 }
 /** All real set codes found in a block of OCR text, best first. */
 function matchAll(text) {
@@ -281,7 +306,7 @@ async function startCamera() {
   }
   scanning = wantScan = true; reads = []; changed = true;
   $("startBtn").textContent = "Pause";
-  setStatus("Place une carte dans le cadre, code de set dans la zone pointillée");
+  setStatus("Place une carte dans le cadre");
   loop();
 }
 function stopCamera(keepWanted = false) {
@@ -294,19 +319,22 @@ function stopCamera(keepWanted = false) {
 async function loop() {
   while (scanning) {
     try { await scanFrame(); } catch (e) { console.warn(e); await sleep(300); }
-    await sleep(30);
+    await sleep(0);
   }
 }
 // The lower part of the card holds the set code (right, under the artwork; bottom-left on Pendulum
 // cards) and the "1st Edition" mention. Reading this whole area tolerates a badly placed card.
 const LOWER = { y: 0.56, h: 0.46, x: -0.04, w: 1.08 };
+let sawEmpty = true; // a frame without any readable code since the last card was added
 async function scanFrame() {
   if (!video.videoWidth) { await sleep(100); return; }
   const r = guideInVideo();
   const sig = signature(r);
-  if (!changed && last) {
-    if (sigDiff(sig, last.sig) > 22) { if (++changedHits >= 2) { changed = true; reads = []; } }
+  if (!changed) {
+    // The card just added is still in front of the camera: only watch (cheaply) for it to move away.
+    if (sigDiff(sig, last.sig) > 22) { if (++changedHits >= 2) { changed = true; reads = []; sawEmpty = false; setStatus("Recherche du code…"); } }
     else changedHits = 0;
+    if (!changed) { await sleep(120); return; }
   }
   const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
   const zw = Math.min(video.videoWidth - zx, r.w * LOWER.w), zh = Math.min(video.videoHeight - zy, r.h * LOWER.h);
@@ -319,16 +347,18 @@ async function scanFrame() {
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
-  if (!m) { setStatus(changed ? "Recherche du code…" : "Retire la carte et présente la suivante"); return; }
-  if (!changed) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); return; }
+  if (!m) { if (!res.boxes.length || res.lines.every((l) => !l.text)) sawEmpty = true; setStatus("Recherche du code…"); return; }
+  // Same code as the card just added and the camera never saw the card leave: it is the same card being moved.
+  if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); changed = false; last.sig = sig; return; }
   const hits = reads.filter((k) => k === m.key).length;
-  setStatus(`Lu : <span class="code">${esc(m.code)}</span> (${hits}/2)`);
-  if (hits >= 2) {
+  if (m.exact || hits >= 2) {
     const firstEd = await detectEdition(zone, res.boxes, textH);
-    commit(makeItem(m, { firstEd }), "scan");
-    last = { sig }; changed = false; changedHits = 0; reads = [];
-    flash(); beep();
-  }
+    const it = makeItem(m, { firstEd });
+    commit(it, "scan");
+    last = { sig, key: m.key }; changed = false; changedHits = 0; reads = []; sawEmpty = false;
+    celebrate(it); beep();
+    setStatus(`Ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`);
+  } else setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`);
 }
 async function detectEdition(zone, boxes, textH) {
   try {
@@ -347,7 +377,19 @@ function showDebug(zone, res, r) {
   $("debugText").textContent = `Lignes lues : ${res.lines.map((l) => l.text || "∅").join(" ⏎ ") || "(aucune)"}\nCode(s) reconnu(s) : ${res.matches.map((m) => m.code + (m.unsure ? " (incertain)" : "")).join(", ") || "aucun"}\nVidéo ${video.videoWidth}×${video.videoHeight} · carte ${Math.round(r.w)}×${Math.round(r.h)} px · ${res.boxes.length} zone(s) de texte`;
   $("debug").hidden = false;
 }
-function flash() { const g = $("guide"); g.classList.add("hit"); setTimeout(() => g.classList.remove("hit"), 700); }
+/** Restart a one-shot CSS animation on an element. */
+function bump(el, cls = "bump") { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+/** Visual feedback when a card is added: green frame, a ticket flying to the list, counter pop. */
+function celebrate(it) {
+  bump($("guide"), "hit");
+  const fly = document.createElement("div");
+  fly.className = "fly";
+  fly.innerHTML = `<span class="code">${esc(it.code)}</span><span>${esc(it.nameFR)}</span>`;
+  $("stage").append(fly);
+  fly.addEventListener("animationend", () => fly.remove());
+  setTimeout(() => fly.remove(), 1500);
+  bump($("tabCount")); bump($("sessionCount"));
+}
 function beep() {
   if (!settings.sound || !audioCtx) return;
   try {
@@ -409,18 +451,28 @@ function setRarity(it, rarity) {
   const twin = items.find((x) => x !== it && mergeKey(x) === mergeKey(it));
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
-const cmLink = (it) => `https://www.cardmarket.com/fr/YuGiOh/Products/Search?searchString=${encodeURIComponent(it.nameEN || "")}`;
+// Cardmarket language ids (offer filter "language=").
+const CM_LANG = { English: 1, French: 2, German: 3, Spanish: 4, Italian: 5, Portuguese: 8 };
+/** Product page with offers filtered on the card's language; a name search when the exact product is unknown. */
+const cmLink = (it) => {
+  const lang = CM_LANG[it.lang] || 2;
+  return typeof it.cm === "number" && it.cm
+    ? `https://www.cardmarket.com/fr/YuGiOh/Products?idProduct=${it.cm}&language=${lang}`
+    : `https://www.cardmarket.com/fr/YuGiOh/Products/Search?searchString=${encodeURIComponent(it.nameEN || "")}&language=${lang}`;
+};
 
 /* ================= rendering ================= */
 function renderLast() {
   const box = $("last");
   const it = lastAdded && items.find((x) => x.id === lastAdded.id);
   if (!it) { box.hidden = true; return; }
-  box.hidden = false; box.className = "last" + (it.rarity ? "" : " todo");
+  const fresh = box.dataset.id !== it.id + ":" + it.qty;
+  box.dataset.id = it.id + ":" + it.qty;
+  box.hidden = false; box.className = "last" + (it.rarity ? "" : " todo") + (fresh ? " enter" : "");
   const p = priceText(cmPrice(it.cm));
   box.innerHTML = `
     <div class="row1"><span class="name">${esc(it.nameFR)}</span><span class="price">${esc(p || "cote ?")}</span></div>
-    <div class="sub"><span class="code">${esc(it.code)}</span> · ${esc(it.set)} · ${LANG_SHORT[it.lang] || ""}${it.qty > 1 ? ` · ×${it.qty}` : ""}</div>
+    <div class="sub"><span class="code">${esc(it.code)}</span> · ${esc(it.set)} · <span class="lang">${LANG_SHORT[it.lang] || ""}</span>${it.qty > 1 ? ` · ×${it.qty}` : ""}</div>
     ${it.cands.length > 1 ? `<div class="sub">${it.rarity ? "Rareté :" : "<span class=flag>Choisis la rareté :</span>"}</div>
       <div class="chips">${it.cands.map((c) => `<button class="chip ${c.rarity === it.rarity ? "on" : ""}" data-rar="${esc(c.rarity)}">${esc(c.rarity)}</button>`).join("")}</div>`
       : `<div class="chips"><span class="chip on">${esc(it.rarity)}</span></div>`}
@@ -428,7 +480,7 @@ function renderLast() {
       <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed">1re édition</button>
       <button class="chip" data-act="plus">+1 exemplaire</button>
       <button class="chip" data-act="undo">Annuler</button>
-      <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">Cardmarket ↗</a>
+      <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"}) ↗</a>
     </div>`;
 }
 $("last").addEventListener("click", (e) => {
@@ -447,6 +499,7 @@ function renderList() {
   let value = 0, priced = 0;
   for (const x of items) { const p = cmPrice(x.cm); if (p && p.lo === p.hi) { value += p.lo * x.qty; priced += x.qty; } }
   $("tabCount").textContent = total;
+  if (document.activeElement !== $("sessionTitle")) $("sessionTitle").value = current.name;
   $("totals").textContent = `${total} carte${total > 1 ? "s" : ""}` + (priced ? ` · cote ≈ ${eur(value)}${priced < total ? ` (sur ${priced})` : ""}` : "");
   const todo = items.filter((x) => !x.rarity).length;
   $("exportNote").textContent = todo ? `${todo} ligne${todo > 1 ? "s" : ""} sans rareté : elles ne seront pas exportées tant que tu ne l'as pas choisie.` : "";
@@ -454,9 +507,11 @@ function renderList() {
   $("empty").hidden = items.length > 0;
   $("list").innerHTML = shown.map((it) => {
     const p = priceText(cmPrice(it.cm));
-    return `<div class="item ${it.rarity ? "" : "todo"}" data-id="${it.id}">
+    const isNew = Date.now() - it.createdAt < 1500;
+    return `<div class="item ${it.rarity ? "" : "todo"} ${isNew ? "enter" : ""}" data-id="${it.id}">
       <div class="row1" style="display:flex;justify-content:space-between;gap:8px"><span class="name">${esc(it.nameFR)}</span><span class="price">${esc(p)}</span></div>
-      <div class="sub"><span class="code">${esc(it.code)}</span> · ${esc(it.set)} · <a href="${cmLink(it)}" target="_blank" rel="noopener" style="color:inherit">Cardmarket ↗</a></div>
+      <div class="sub"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</div>
+      <a class="cm-link" href="${cmLink(it)}" target="_blank" rel="noopener">Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"}) ↗</a>
       <div class="row">
         ${it.cands.length > 1 ? `<select data-f="rarity" aria-label="Rareté">${it.rarity ? "" : `<option value="">Rareté ?</option>`}${it.cands.map((c) => `<option ${c.rarity === it.rarity ? "selected" : ""}>${esc(c.rarity)}</option>`).join("")}</select>` : `<span class="chip on">${esc(it.rarity)}</span>`}
         <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed">1re éd.</button>
@@ -497,6 +552,52 @@ document.querySelector(".filters").addEventListener("click", (e) => {
   renderList();
 });
 
+/* ================= sessions UI ================= */
+function sessionStats(s) {
+  let n = 0, v = 0; for (const x of s.items) { n += x.qty; const p = cmPrice(x.cm); if (p && p.lo === p.hi) v += p.lo * x.qty; }
+  return { n, v };
+}
+function renderSessionBar() {
+  $("sessionName").textContent = current.name;
+  const { n } = sessionStats(current);
+  $("sessionCount").textContent = `${n} carte${n > 1 ? "s" : ""}`;
+}
+function deleteSession(s) {
+  sessions = sessions.filter((x) => x !== s);
+  if (!sessions.length) sessions = [newSession()];
+  if (s === current) switchSession(sessions[0]); else saveItems();
+}
+let delArmed = null;
+function renderSessions() {
+  $("sessionList").innerHTML = sessions.map((s) => {
+    const { n, v } = sessionStats(s);
+    const d = new Date(s.updatedAt || s.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+    return `<div class="srow ${s === current ? "on" : ""}" data-sid="${s.id}">
+      <button class="sopen" data-act="open"><span class="name">${esc(s.name)}</span>
+        <span class="sub">${n} carte${n > 1 ? "s" : ""}${v ? ` · ≈ ${eur(v)}` : ""} · ${d}${s === current ? " · en cours" : ""}</span></button>
+      <button class="del" data-act="del">${delArmed === s.id ? "Confirmer ?" : "Supprimer"}</button>
+    </div>`;
+  }).join("");
+}
+function openSheet() { delArmed = null; renderSessions(); $("sheet").hidden = false; }
+$("sessionsBtn").addEventListener("click", openSheet);
+$("sessionBar").addEventListener("click", (e) => { if (!e.target.closest("#newSessionBtn")) openSheet(); });
+$("newSessionBtn").addEventListener("click", startNewSession);
+$("sheetNew").addEventListener("click", () => { startNewSession(); $("sheet").hidden = true; });
+$("sheetClose").addEventListener("click", () => ($("sheet").hidden = true));
+$("sheet").addEventListener("click", (e) => {
+  if (e.target === $("sheet")) { $("sheet").hidden = true; return; }
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const s = sessions.find((x) => x.id === b.closest("[data-sid]").dataset.sid); if (!s) return;
+  if (b.dataset.act === "open") { switchSession(s); $("sheet").hidden = true; toast(`Session « ${s.name} » ouverte`); return; }
+  if (delArmed !== s.id) { delArmed = s.id; renderSessions(); setTimeout(() => { if (delArmed === s.id) { delArmed = null; renderSessions(); } }, 4000); return; }
+  delArmed = null; deleteSession(s); renderSessions(); toast("Session supprimée");
+});
+$("sessionTitle").addEventListener("change", (e) => {
+  const v = e.target.value.trim(); if (!v) { e.target.value = current.name; return; }
+  current.name = v; saveItems();
+});
+
 /* ================= export ================= */
 const HEAD = ["cardmarketId", "quantity", "name", "set", "setCode", "cn", "condition", "language", "isFirstEd", "isSigned", "price", "comment", "nameDE", "nameES", "nameFR", "nameIT", "rarity", "listedAt"];
 const q = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
@@ -519,7 +620,8 @@ function buildCsv() {
 $("exportBtn").addEventListener("click", async () => {
   const { csv, count } = buildCsv();
   if (!count) { toast("Rien à exporter (choisis la rareté des cartes en orange)."); return; }
-  const name = `cardmarket-scan-${new Date().toISOString().slice(0, 10)}.csv`;
+  const slug = current.name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+  const name = `cardmarket-${slug || "scan"}.csv`;
   const file = new File(["﻿" + csv], name, { type: "text/csv" });
   try {
     if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
@@ -541,8 +643,8 @@ function bindSettings() {
 }
 let clearArmed = 0;
 $("clearBtn").addEventListener("click", () => {
-  if (Date.now() - clearArmed > 4000) { clearArmed = Date.now(); $("clearBtn").textContent = "Confirmer : tout effacer ?"; setTimeout(() => ($("clearBtn").textContent = "Vider la liste"), 4000); return; }
-  clearArmed = 0; items = []; lastAdded = null; saveItems(); renderLast(); $("clearBtn").textContent = "Vider la liste"; toast("Liste vidée");
+  if (Date.now() - clearArmed > 4000) { clearArmed = Date.now(); $("clearBtn").textContent = "Confirmer : supprimer cette session ?"; setTimeout(() => ($("clearBtn").textContent = "Supprimer cette session"), 4000); return; }
+  clearArmed = 0; deleteSession(current); $("clearBtn").textContent = "Supprimer cette session"; toast("Session supprimée");
 });
 document.querySelector(".tabs").addEventListener("click", (e) => {
   const b = e.target.closest(".tab"); if (!b) return;
@@ -568,7 +670,7 @@ let toastT;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2800); }
 
 /* ================= boot ================= */
-bindSettings(); renderList(); renderLast(); loadData();
+bindSettings(); renderList(); renderSessionBar(); renderLast(); loadData();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
   matchAll, matchManual, buildCsv, grab, detectText, recognize, readCodes, get DATA() { return DATA; },
