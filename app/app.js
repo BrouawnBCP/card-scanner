@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "26";
+const APP_VERSION = "27";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -288,9 +288,9 @@ async function recognize(c, b) {
 }
 /** All set codes found in canvas `c` (detection + recognition of every likely line). */
 async function readCodes(c, { textH = 0, maxLines = 8, prefer = null } = {}) {
-  let boxes = (await detectText(c)).filter((b) => b.w > b.h * 2);
+  const raw = (await detectText(c)).filter((b) => b.w > b.h * 2);
   // detected boxes are padded ("unclip"): about 2.5× the height of the letters
-  if (textH) boxes = boxes.filter((b) => b.h > textH * 0.6 && b.h < textH * 4.5);
+  let boxes = textH ? raw.filter((b) => b.h > textH * 0.6 && b.h < textH * 4.5) : raw;
   if (prefer) boxes.sort((a, b) => prefer(a) - prefer(b));
   const lines = [];
   for (const b of boxes.slice(0, maxLines)) {
@@ -299,7 +299,7 @@ async function readCodes(c, { textH = 0, maxLines = 8, prefer = null } = {}) {
     lines.push({ box: b, text, matches });
     if (matches.some((m) => !m.unsure) && prefer) break;
   }
-  return { boxes, lines, matches: lines.flatMap((l) => l.matches) };
+  return { boxes, raw, lines, matches: lines.flatMap((l) => l.matches) };
 }
 
 /* ================= camera scanning ================= */
@@ -406,6 +406,7 @@ function setShutter(on) {
   const b = $("startBtn"); b.classList.toggle("on", on);
   b.setAttribute("aria-label", on ? "Mettre le scan en pause" : "Démarrer le scan");
   $("stage").classList.toggle("live", on);
+  if (!on) { failStreak = 0; showHint(null); }
 }
 /* ----- flash (torch). iOS 17+ accepts the "torch" constraint but may not report it back, so we keep our own state. */
 let torchOn = false;
@@ -445,6 +446,64 @@ async function loop() {
 // cards) and the "1st Edition" mention. Reading this whole area tolerates a badly placed card.
 const LOWER = { y: 0.56, h: 0.46, x: -0.04, w: 1.08 };
 let sawEmpty = true; // a frame without any readable code since the last card was added
+
+/* ----- scanning help: why a card is not read ----- */
+let failStreak = 0;
+const statCanvas = document.createElement("canvas");
+/** Brightness, glare and sharpness of the lower part of the card (on a small copy, fast). */
+function frameStats(zone) {
+  const w = 200, h = Math.max(8, Math.round(zone.height * w / zone.width));
+  statCanvas.width = w; statCanvas.height = h;
+  const g = statCanvas.getContext("2d", { willReadFrequently: true }); g.drawImage(zone, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data, n = w * h, L = new Float32Array(n);
+  let sum = 0, sq = 0, hot = 0;
+  for (let i = 0; i < n; i++) { const y = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114; L[i] = y; sum += y; sq += y * y; if (y > 245) hot++; }
+  const std = Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2));
+  let s1 = 0, s2 = 0, m = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x, v = 4 * L[i] - L[i - 1] - L[i + 1] - L[i - w] - L[i + w];
+    s1 += v; s2 += v * v; m++;
+  }
+  return { mean: sum / n, std, glare: hot / n, sharp: s2 / m - (s1 / m) ** 2 };
+}
+const HINTS = {
+  dark: ["Pas assez de lumière", "Active le flash ⚡ ou rapproche-toi d'une source de lumière."],
+  glare: ["Reflet sur la carte", "Incline légèrement la carte ou le téléphone. Si la carte brille beaucoup, coupe le flash."],
+  blur: ["Image floue", "Tiens le téléphone immobile, à 15–25 cm de la carte, le temps que la mise au point se fasse."],
+  far: ["Carte trop loin", "Rapproche le téléphone : la carte doit remplir le cadre doré."],
+  close: ["Carte trop près", "Éloigne un peu le téléphone : toute la carte doit tenir dans le cadre."],
+  empty: ["Aucune carte détectée", "Place une carte face visible dans le cadre doré."],
+  nocode: ["Code de set illisible", "Vérifie que le code (sous l'illustration, à droite, ex. MP20-FR167) est bien visible : pas de doigt, de reflet ou de sleeve opaque dessus."],
+  unsure: ["Code incertain", "Garde la carte immobile une seconde, sans bouger le téléphone."],
+};
+function diagnose(zone, res, textH) {
+  const st = frameStats(zone);
+  if (st.mean < 60) return "dark";
+  if (st.glare > 0.06) return "glare";
+  // nothing readable: a flat picture means no card at all, a contrasted but soft one means a blurry card
+  const all = res.raw || res.boxes;
+  if (!all.length) return st.std < 16 ? "empty" : st.sharp < 18 ? "blur" : "empty";
+  // detected text lines are about 2.5× the letter height: compare every line found (even the ones too big
+  // or too small to be read) with the size expected for a card that fills the frame
+  const hs = all.map((b) => b.h).sort((a, b) => a - b), med = hs[hs.length >> 1], ratio = med / (2.5 * textH);
+  window.__diag = { ratio, hs, textH, ...st }; // for troubleshooting from the console
+  // measured on a card that fills the frame: ratio ≈ 0.6 with several lines found
+  if (ratio < 0.42) return "far";
+  if (ratio > 1.1 || (all.length <= 2 && ratio > 0.85)) return "close";
+  if (st.sharp < 18) return "blur";
+  if (res.matches.some((x) => x.unsure)) return "unsure";
+  return "nocode";
+}
+let hintShown = null;
+function showHint(kind) {
+  if (kind === hintShown) return;
+  hintShown = kind;
+  const box = $("scanHint");
+  if (!kind) { box.hidden = true; return; }
+  const [title, text] = HINTS[kind];
+  box.innerHTML = `<span class="hint-ico">${ico(kind === "dark" ? "flash" : kind === "far" || kind === "close" ? "scan" : "card")}</span><div><strong>${esc(title)}</strong><span>${esc(text)}</span></div>`;
+  box.hidden = false;
+}
 async function scanFrame() {
   if (!video.videoWidth) { await sleep(100); return; }
   const r = guideInVideo();
@@ -476,7 +535,14 @@ async function scanFrame() {
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
-  if (!m) { if (!res.boxes.length || res.lines.every((l) => !l.text)) sawEmpty = true; setStatus("Recherche du code…"); return; }
+  if (!m) {
+    if (!res.boxes.length || res.lines.every((l) => !l.text)) sawEmpty = true;
+    setStatus("Recherche du code…");
+    // after a few failed reads, tell the person what is probably wrong
+    if (++failStreak >= 3) showHint(diagnose(zone, res, textH));
+    return;
+  }
+  failStreak = 0; showHint(null);
   // Same code as the card just added and the camera never saw the card leave: it is the same card being moved.
   if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); changed = false; last.sig = sig; return; }
   const hits = reads.filter((k) => k === m.key).length;
