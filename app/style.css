@@ -98,7 +98,13 @@ input::placeholder{color:var(--faint)}
 .meta .code{font-family:var(--f-mono);color:var(--gold);font-size:12.5px}
 .price{font:700 16px var(--f-mono);font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
 .price.range{font-size:13px;color:var(--muted)}
-.price.own{color:var(--gold)}
+.price.own{color:var(--gold);display:inline-flex;align-items:center;gap:3px}
+.trend{display:inline-flex}
+.trend .ico{width:15px;height:15px;stroke-width:3}
+.trend.up{color:var(--ok)}
+.trend.down{color:var(--bad)}
+.diff{font-weight:700;font-family:var(--f-mono)}
+.diff.up{color:var(--ok)} .diff.down{color:var(--bad)}
 .market-line{margin:0}
 .market-line strong{color:var(--ink);font-family:var(--f-mono)}
 .ask{font-size:13px;font-weight:600;color:var(--warn)}

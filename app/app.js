@@ -1,5 +1,5 @@
-/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "24";
+﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "25";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -686,7 +686,16 @@ const itemPrice = (it) => { const o = ownPrice(it); if (o != null) return { lo: 
 const priceHtml = (it) => {
   const p = itemPrice(it);
   if (!p) return `<span class="price range">—</span>`;
-  if (p.own) return `<span class="price own" title="Ton prix de vente">${esc(eur(p.lo))}</span>`;
+  if (p.own) {
+    // arrow: green ↑ when the market trend is above your price (you could ask more), red ↓ when below
+    const m = cmPrice(it.cm), cote = m && m.lo === m.hi ? m.lo : null;
+    let arrow = "";
+    if (cote != null && Math.abs(cote - p.lo) >= 0.01) {
+      const up = cote > p.lo, pct = Math.round(((cote - p.lo) / p.lo) * 100);
+      arrow = `<span class="trend ${up ? "up" : "down"}" title="Cote Cardmarket ${eur(cote)} (${pct > 0 ? "+" : ""}${pct} % par rapport à ton prix)" aria-label="${up ? "Cote au-dessus de ton prix" : "Cote en dessous de ton prix"}">${ico(up ? "up" : "down")}</span>`;
+    }
+    return `<span class="price own" title="Ton prix de vente">${arrow}${esc(eur(p.lo))}</span>`;
+  }
   return p.lo === p.hi ? `<span class="price" title="Cote tendance Cardmarket">${esc(eur(p.lo))}</span>` : `<span class="price range" title="Plusieurs versions possibles">${num(p.lo)}–${num(p.hi)} €</span>`;
 };
 /** Line in the detail panel: Cardmarket trend next to the own price. */
@@ -694,7 +703,13 @@ function marketLine(it) {
   const p = cmPrice(it.cm);
   if (!p) return "";
   const t = p.lo === p.hi ? eur(p.lo) : `${num(p.lo)}–${num(p.hi)} €`;
-  return `<p class="full muted small market-line">Cote Cardmarket (tendance) : <strong>${esc(t)}</strong>${ownPrice(it) != null ? ` · ton prix : <strong>${esc(eur(ownPrice(it)))}</strong>` : ""}</p>`;
+  const o = ownPrice(it);
+  let diff = "";
+  if (o != null && p.lo === p.hi && Math.abs(p.lo - o) >= 0.01) {
+    const pct = Math.round(((p.lo - o) / o) * 100);
+    diff = ` <span class="diff ${pct > 0 ? "up" : "down"}">${pct > 0 ? "▲ +" : "▼ "}${pct} %</span>`;
+  }
+  return `<p class="full muted small market-line">Cote Cardmarket (tendance) : <strong>${esc(t)}</strong>${o != null ? ` · ton prix : <strong>${esc(eur(o))}</strong>${diff}` : ""}</p>`;
 }
 const ico = (id) => `<svg class="ico"><use href="#i-${id}"/></svg>`;
 /** YGOPRODeck id of the item's card (its thumbnail is img/<id>.webp). */
