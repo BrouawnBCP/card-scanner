@@ -97,7 +97,8 @@ def who(m):
 
 
 def simple(m):
-    return {"id": m["id"], "author": who(m), "date": m["timestamp"][:16].replace("T", " "), "text": m.get("content", ""),
+    embeds = " ".join(f"[{e.get('title', '')}] {e.get('description', '')}".strip() for e in m.get("embeds", []))
+    return {"id": m["id"], "author": who(m), "date": m["timestamp"][:16].replace("T", " "), "text": " ".join(x for x in (m.get("content", ""), embeds) if x),
             "attachments": [a["filename"] for a in m.get("attachments", [])]}
 
 
