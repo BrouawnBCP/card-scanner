@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "10";
+const APP_VERSION = "11";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -810,7 +810,9 @@ async function sync() {
     }
     lastSync = Date.now(); store.set("cs-lastsync", lastSync); setCloud("ok");
   } catch (e) {
-    console.warn(e); setCloud("err", "La synchronisation a échoué. Elle sera retentée automatiquement.");
+    console.warn(e);
+    const detail = [e?.code, e?.message || String(e)].filter(Boolean).join(" · ").slice(0, 160);
+    setCloud("err", `La synchronisation a échoué (${detail}). Nouvel essai automatique.`);
   } finally {
     syncing = false;
     if (syncAgain) { syncAgain = false; scheduleSync(500); }
