@@ -33,6 +33,12 @@ jobs:
           python tools/build_riftbound.py --out app/data/riftbound.json || \
             curl -fsSL "https://brouawnbcp.github.io/card-scanner/data/riftbound.json" -o app/data/riftbound.json || \
             echo "Base Riftbound indisponible ce soir"
+      - name: Construire la base One Piece
+        # si une source ne répond pas, on garde la base publiée la veille
+        run: |
+          python tools/build_onepiece.py --out app/data/onepiece.json || \
+            curl -fsSL "https://brouawnbcp.github.io/card-scanner/data/onepiece.json" -o app/data/onepiece.json || \
+            echo "Base One Piece indisponible ce soir"
 
       # Les vignettes sont stockées sur une branche à part : chaque image n'est téléchargée
       # qu'une seule fois chez YGOPRODeck, comme ils le demandent.
