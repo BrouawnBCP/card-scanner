@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "44";
+const APP_VERSION = "45";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -55,6 +55,7 @@ async function loadSessions() {
     const saved = await idb.get("sessions");
     if (Array.isArray(saved) && saved.length) {
       sessions = saved;
+      for (const s of sessions) fixItems(s.items);
       current = sessions.find((s) => s.id === store.get("cs-current", "")) || sessions[0];
       items = current.items;
     } else {
@@ -90,6 +91,9 @@ function startNewSession() {
 navigator.storage?.persist?.().catch(() => {});
 
 /* ================= card data ================= */
+/** Spelling fixes for rarity names from the card database ("PLatinum Secret Rare" → "Platinum Secret Rare"). */
+const fixRar = (r) => (typeof r === "string" ? r.replace(/\bPLatinum\b/g, "Platinum") : r);
+function fixItems(list) { for (const it of list || []) { it.rarity = fixRar(it.rarity); for (const c of it.cands || []) c.rarity = fixRar(c.rarity); } }
 let DATA = null, PREFIXES = null;
 /* Riftbound: second card game, its own database (data/riftbound.json). Items carry game: "rb". */
 let RB = null;
@@ -108,6 +112,7 @@ async function loadData() {
   try {
     const r = await fetch("data/cards.json");
     DATA = await r.json();
+    for (const l of Object.values(DATA.prints)) for (const e of l) e[2] = fixRar(e[2]);
     PREFIXES = new Set(Object.keys(DATA.prints).map((k) => k.slice(0, k.indexOf("-"))));
     $("dataInfo").textContent = `Version ${APP_VERSION} · Base : ${DATA.cards.length.toLocaleString("fr-FR")} cartes · cotes Cardmarket du ${new Date(DATA.v).toLocaleDateString("fr-FR")}`;
     renderList();
@@ -1908,6 +1913,7 @@ async function sync() {
       const rt = Date.parse(r.updated_at), l = sessions.find((s) => s.id === r.id);
       if (r.deleted) { if (l && (l.updatedAt || 0) <= rt) { sessions = sessions.filter((s) => s !== l); changedLocal = true; } continue; }
       if (!remoteItems.has(r.id)) continue;
+      fixItems(remoteItems.get(r.id));
       if (!l) { sessions.push({ id: r.id, name: r.name, items: remoteItems.get(r.id), createdAt: Date.parse(r.created_at), updatedAt: rt }); changedLocal = true; }
       else { l.name = r.name; l.items = remoteItems.get(r.id); l.updatedAt = rt; changedLocal = true; }
     }

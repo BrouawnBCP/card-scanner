@@ -69,3 +69,8 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .bulkbar{background:rgba(12,14,32,.94);border-color:rgba(120,170,255,.22);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
 .sheet-card{background:#070915;border-color:rgba(120,170,255,.16)}
 select option{background:#0c0f22;color:var(--ink)}
+/* bubbles shown when a card is added and short messages: dark glass, light text (no more black on white) */
+.fly{background:rgba(8,12,30,.94);color:#fff;border:1px solid rgba(79,209,139,.6);box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 24px rgba(79,209,139,.28)}
+.fly:not(.gem) .code{color:#6fe3a6}
+.fly-stock{background:rgba(255,255,255,.1);color:#cfe6ff}
+.toast{background:rgba(10,13,30,.95);color:var(--ink);border:1px solid rgba(120,170,255,.32);box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 20px rgba(63,212,255,.18)}

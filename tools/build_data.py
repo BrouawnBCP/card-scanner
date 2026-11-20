@@ -75,7 +75,8 @@ def main():
             sn = s["set_name"]
             if sn not in sets:
                 sets[sn] = len(setnames); setnames.append(sn)
-            prints.setdefault(f"{p}-{n}", []).append([ci, sets[sn], s["set_rarity"], 0, 0])
+            rarity = re.sub(r"\bPLatinum\b", "Platinum", s["set_rarity"])  # YGOPRODeck typo
+            prints.setdefault(f"{p}-{n}", []).append([ci, sets[sn], rarity, 0, 0])
             set_cards[sn].add(norm(c["name"]))
 
     # ---- Cardmarket products grouped by expansion ----
