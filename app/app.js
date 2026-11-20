@@ -1,5 +1,5 @@
-﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "15";
+/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "16";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -423,6 +423,8 @@ function celebrate(it) {
   fly.innerHTML = gem
     ? `<span class="gem-title">${ico("gem")} Pépite !</span><span>${esc(it.nameFR)}</span><span class="gem-price">${gem.lo === gem.hi ? esc(eur(gem.lo)) : `jusqu'à ${esc(eur(gem.hi))}`}</span>`
     : `<span class="code">${esc(it.code)}</span><span>${esc(it.nameFR)}</span>`;
+  const st = stockOf(it);
+  if (st) fly.innerHTML += `<span class="fly-stock">Déjà ${st.n} en stock</span>`;
   $("stage").append(fly);
   if (gem) { const burst = document.createElement("div"); burst.className = "burst"; $("stage").append(burst); setTimeout(() => burst.remove(), 1600); }
   fly.addEventListener("animationend", () => fly.remove());
@@ -564,6 +566,7 @@ function renderLast() {
         <span class="eyebrow">Dernière carte${it.qty > 1 ? ` · ×${it.qty}` : ""}</span>
         <span class="name">${esc(it.nameFR)}</span>
         <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
+        ${(() => { const s = stockOf(it); return s ? `<span class="stock-pill">${ico("stack")} Déjà ${s.n} en stock${s.lang && s.lang !== s.n ? ` (${s.lang} ${LANG_SHORT[it.lang] || ""})` : ""}</span>` : ""; })()}
       </div>
       ${priceHtml(it.cm)}
     </div>
@@ -587,20 +590,93 @@ $("last").addEventListener("click", (e) => {
 });
 
 let filter = "all", sortBy = "recent", query = "", openId = null;
+let listMode = "session", selecting = false; const selected = new Set();
 const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]/g, "");
 const unitPrice = (it) => { const p = cmPrice(it.cm); return p ? (p.lo + p.hi) / 2 : -1; };
 const rarClass = (r) => (RAR[r] || [null, "r-c"])[1];
-function visibleItems() {
+
+/* ----- my Cardmarket stock (imported CSV, kept on this device) ----- */
+let STOCK = store.get("cs-stock", null);
+const stockKey = (setCode, cn, rarity) => `${String(setCode).toUpperCase().replace(/-[A-Z]$/, "")}-${cn}|${rarity}`;
+function stockOf(it) {
+  if (!STOCK) return null;
+  const e = (typeof it.cm === "number" && it.cm && STOCK.byId[it.cm]) || (it.rarity && STOCK.byKey[stockKey(it.prefix, it.cn, it.rarity)]);
+  return e ? { n: e.n, lang: e.lang[it.lang] || 0 } : null;
+}
+function parseCsv(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === "," || c === ";") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x !== ""));
+}
+function importStock(text) {
+  const rows = parseCsv(text.replace(/^﻿/, ""));
+  const head = (rows.shift() || []).map((h) => h.trim());
+  const col = (n) => head.indexOf(n);
+  const ci = { id: col("cardmarketId"), qty: col("quantity"), set: col("setCode"), cn: col("cn"), lang: col("language"), rar: col("rarity") };
+  if (ci.id < 0 || ci.qty < 0) throw new Error("format");
+  const byId = {}, byKey = {}; let n = 0;
+  const add = (map, k, qty, lang) => { const e = map[k] || (map[k] = { n: 0, lang: {} }); e.n += qty; e.lang[lang] = (e.lang[lang] || 0) + qty; };
+  for (const r of rows) {
+    const qty = parseInt(r[ci.qty], 10) || 0; if (!qty) continue;
+    const lang = r[ci.lang] || "";
+    if (r[ci.id]) add(byId, r[ci.id], qty, lang);
+    if (ci.set >= 0 && ci.cn >= 0 && ci.rar >= 0 && r[ci.set]) add(byKey, stockKey(r[ci.set], r[ci.cn], r[ci.rar]), qty, lang);
+    n += qty;
+  }
+  STOCK = { at: Date.now(), lines: rows.length, cards: n, byId, byKey };
+  if (!store.set("cs-stock", STOCK)) throw new Error("storage");
+}
+function renderStockInfo() {
+  $("stockClear").hidden = !STOCK;
+  $("stockLabel").firstChild.textContent = STOCK ? "Importer un export plus récent" : "Importer mon export (CSV)";
+  $("stockInfo").textContent = STOCK
+    ? `${STOCK.cards.toLocaleString("fr-FR")} cartes en stock (${STOCK.lines.toLocaleString("fr-FR")} lignes), importé le ${new Date(STOCK.at).toLocaleDateString("fr-FR")}.`
+    : "Importe l'export de ton stock pour voir, sur chaque carte scannée, combien tu en as déjà en vente.";
+}
+$("stockFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  try { importStock(await f.text()); renderStockInfo(); renderList(); renderLast(); toast(`Stock importé : ${STOCK.cards.toLocaleString("fr-FR")} cartes`); }
+  catch (err) { toast(err.message === "format" ? "Ce fichier n'est pas un export de stock Cardmarket (colonne cardmarketId absente)." : "Import impossible : fichier trop gros pour cet appareil."); }
+});
+$("stockClear").addEventListener("click", () => { STOCK = null; try { localStorage.removeItem("cs-stock"); } catch {} renderStockInfo(); renderList(); renderLast(); toast("Stock retiré"); });
+const stockTag = (it) => { const s = stockOf(it); return s ? `<span class="tag stock" title="Déjà dans ton stock Cardmarket">stock ${s.n}</span>` : ""; };
+
+/* ----- "Ma collection": every session merged, one line per card version and language ----- */
+function collection() {
+  const map = new Map();
+  for (const s of sessions) for (const it of s.items) {
+    const k = [typeof it.cm === "number" && it.cm ? it.cm : it.key, it.rarity, it.lang, it.firstEd].join("|");
+    let e = map.get(k);
+    if (!e) { e = { ...it, id: "col:" + k, qty: 0, createdAt: 0, sessionsIn: [] }; map.set(k, e); }
+    e.qty += it.qty; e.createdAt = Math.max(e.createdAt, it.createdAt || 0);
+    const si = e.sessionsIn.find((x) => x.s === s); if (si) si.qty += it.qty; else e.sessionsIn.push({ s, qty: it.qty });
+  }
+  return [...map.values()];
+}
+const listSource = () => (listMode === "collection" ? collection() : items);
+
+function visibleItems(list) {
   const q = fold(query);
-  let out = items.filter((it) => {
+  let out = list.filter((it) => {
     if (q && !fold(`${it.nameFR} ${it.nameEN} ${it.code} ${it.set}`).includes(q)) return false;
     if (filter === "todo") return !it.rarity;
     if (filter === "gem") return !!gemPrice(it);
+    if (filter === "instock") return !!stockOf(it);
+    if (filter === "notstock") return !stockOf(it);
     if (filter.startsWith("rar:")) return it.rarity && rarClass(it.rarity) === filter.slice(4);
     if (filter.startsWith("lang:")) return it.lang === filter.slice(5);
     return true;
   });
   const by = {
+    recent: listMode === "collection" ? (a, b) => b.createdAt - a.createdAt : null,
     priceDesc: (a, b) => unitPrice(b) - unitPrice(a),
     priceAsc: (a, b) => (unitPrice(a) < 0) - (unitPrice(b) < 0) || unitPrice(a) - unitPrice(b),
     name: (a, b) => a.nameFR.localeCompare(b.nameFR, "fr"),
@@ -610,28 +686,36 @@ function visibleItems() {
   return out;
 }
 function renderList() {
-  const total = items.reduce((n, x) => n + x.qty, 0);
+  const coll = listMode === "collection";
+  const src = listSource();
+  const total = src.reduce((n, x) => n + x.qty, 0);
   let value = 0, priced = 0;
-  for (const x of items) { const p = cmPrice(x.cm); if (p && p.lo === p.hi) { value += p.lo * x.qty; priced += x.qty; } }
-  const todo = items.filter((x) => !x.rarity).length;
-  $("tabCount").textContent = total; $("tabCount").classList.toggle("zero", !total);
-  if (document.activeElement !== $("sessionTitle")) $("sessionTitle").value = current.name;
+  for (const x of src) { const p = cmPrice(x.cm); if (p && p.lo === p.hi) { value += p.lo * x.qty; priced += x.qty; } }
+  const todo = src.filter((x) => !x.rarity).length;
+  const curTotal = items.reduce((n, x) => n + x.qty, 0);
+  $("tabCount").textContent = curTotal; $("tabCount").classList.toggle("zero", !curTotal);
+  $("sessionTitle").hidden = coll; $("collTitle").hidden = !coll;
+  $("selectBtn").hidden = coll; $("sessionsBtn").hidden = coll;
+  if (!coll && document.activeElement !== $("sessionTitle")) $("sessionTitle").value = current.name;
   $("statCards").textContent = total;
   $("statValue").textContent = priced ? eur(value).replace(/\s?€/, " €") : "—";
   $("statValueL").textContent = priced && priced < total ? `cote (${priced}/${total})` : "cote estimée";
   $("statTodo").textContent = todo; $("statTodoBox").classList.toggle("has", todo > 0);
   $("exportNote").hidden = !todo;
   $("exportNote").textContent = `${todo} carte${todo > 1 ? "s" : ""} sans rareté : choisis-la pour qu'elle${todo > 1 ? "s soient exportées" : " soit exportée"}.`;
-  const shown = visibleItems();
-  const narrowed = shown.length !== items.length;
-  $("listCount").hidden = !narrowed || !items.length;
-  $("listCount").textContent = shown.length ? `${shown.length} carte${shown.length > 1 ? "s" : ""} sur ${items.length} affichée${shown.length > 1 ? "s" : ""}` : "Aucune carte ne correspond.";
-  $("empty").hidden = items.length > 0;
-  renderInsights();
+  const shown = visibleItems(src);
+  $("listCount").hidden = shown.length === src.length || !src.length;
+  $("listCount").textContent = shown.length ? `${shown.length} ligne${shown.length > 1 ? "s" : ""} sur ${src.length} affichée${shown.length > 1 ? "s" : ""}` : "Aucune carte ne correspond.";
+  $("empty").hidden = src.length > 0;
+  $("empty").querySelector("p").textContent = coll ? "Ta collection est vide." : "Aucune carte dans cette session.";
+  $("view-list").classList.toggle("selecting", selecting);
+  renderInsights(src, coll);
+  renderBulkBar();
   $("list").innerHTML = shown.map((it) => {
-    const isNew = Date.now() - it.createdAt < 1500, open = openId === it.id;
-    return `<div class="item ${it.rarity ? "" : "todo"} ${isNew ? "enter" : ""}" data-id="${it.id}">
-      <button class="row-main" data-act="toggle" aria-expanded="${open}">
+    const isNew = !coll && Date.now() - it.createdAt < 1500, open = openId === it.id && !selecting, sel = selected.has(it.id);
+    return `<div class="item ${it.rarity ? "" : "todo"} ${isNew ? "enter" : ""} ${sel ? "selected" : ""}" data-id="${esc(it.id)}">
+      <button class="row-main" data-act="${selecting ? "pick" : "toggle"}" aria-expanded="${open}" ${selecting ? `aria-pressed="${sel}"` : ""}>
+        ${selecting ? `<span class="pick" aria-hidden="true">${sel ? ico("check") : ""}</span>` : ""}
         ${thumb(it)}
         <span class="row-text">
           <span class="name">${esc(it.nameFR)}</span>
@@ -639,31 +723,49 @@ function renderList() {
         </span>
         <span class="row-side">
           ${priceHtml(it.cm)}
-          <span class="tags">${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span><span class="tag">${esc(it.condition)}</span></span>
+          <span class="tags">${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}${stockTag(it)}${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span>${coll ? "" : `<span class="tag">${esc(it.condition)}</span>`}</span>
         </span>
       </button>
-      ${open ? `<div class="edit">
-        ${it.cands.length > 1 ? `<label class="full">Rareté<select data-f="rarity">${it.rarity ? "" : `<option value="">À choisir…</option>`}${it.cands.map((c) => `<option ${c.rarity === it.rarity ? "selected" : ""}>${esc(c.rarity)}</option>`).join("")}</select></label>` : ""}
-        <label>État<select data-f="condition">${COND.map((c) => `<option ${c === it.condition ? "selected" : ""}>${c}</option>`).join("")}</select></label>
-        <label>Langue<select data-f="lang">${LANGS.map((l) => `<option value="${l}" ${l === it.lang ? "selected" : ""}>${LANG_SHORT[l]}</option>`).join("")}</select></label>
-        <label>Prix de vente<input data-f="price" inputmode="decimal" placeholder="€" value="${esc(it.price)}"></label>
-        <label>Commentaire<input data-f="comment" placeholder="—" value="${esc(it.comment)}"></label>
-        <div class="edit-row full">
-          <span class="qty"><button data-act="minus" aria-label="Retirer un exemplaire">${ico("minus")}</button><span>${it.qty}</span><button data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")}</button></span>
-          <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
-          <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket</a>
-          <button class="del" data-act="del">${ico("trash")}</button>
-        </div>
-      </div>` : ""}
+      ${open ? (coll ? collDetail(it) : editPanel(it)) : ""}
     </div>`;
   }).join("");
+}
+function editPanel(it) {
+  return `<div class="edit">
+    ${it.cands.length > 1 ? `<label class="full">Rareté<select data-f="rarity">${it.rarity ? "" : `<option value="">À choisir…</option>`}${it.cands.map((c) => `<option ${c.rarity === it.rarity ? "selected" : ""}>${esc(c.rarity)}</option>`).join("")}</select></label>` : ""}
+    <label>État<select data-f="condition">${COND.map((c) => `<option ${c === it.condition ? "selected" : ""}>${c}</option>`).join("")}</select></label>
+    <label>Langue<select data-f="lang">${LANGS.map((l) => `<option value="${l}" ${l === it.lang ? "selected" : ""}>${LANG_SHORT[l]}</option>`).join("")}</select></label>
+    <label>Prix de vente<input data-f="price" inputmode="decimal" placeholder="€" value="${esc(it.price)}"></label>
+    <label>Commentaire<input data-f="comment" placeholder="—" value="${esc(it.comment)}"></label>
+    ${stockLine(it)}
+    <div class="edit-row full">
+      <span class="qty"><button data-act="minus" aria-label="Retirer un exemplaire">${ico("minus")}</button><span>${it.qty}</span><button data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")}</button></span>
+      <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
+      <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket</a>
+      <button class="del" data-act="del" aria-label="Supprimer">${ico("trash")}</button>
+    </div>
+  </div>`;
+}
+function stockLine(it) {
+  const s = stockOf(it);
+  return s ? `<p class="stock-line full">${ico("stack")} Déjà <strong>${s.n}</strong> dans ton stock Cardmarket${s.lang && s.lang !== s.n ? `, dont ${s.lang} en ${LANG_SHORT[it.lang] || ""}` : ""}.</p>` : "";
+}
+function collDetail(it) {
+  return `<div class="edit coll">
+    ${stockLine(it)}
+    <p class="full muted small">Présente dans ${it.sessionsIn.length} session${it.sessionsIn.length > 1 ? "s" : ""} :</p>
+    ${it.sessionsIn.map(({ s, qty }) => `<button class="sess-link full" data-act="opensession" data-sid="${s.id}"><span>${esc(s.name)}</span><span class="tag qty">×${qty}</span>${ico("chev")}</button>`).join("")}
+    <a class="chip full-w" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Voir sur Cardmarket</a>
+  </div>`;
 }
 const itemOf = (el) => items.find((x) => x.id === el.closest("[data-id]")?.dataset.id);
 $("list").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
+  const a = b.dataset.act, rowId = b.closest("[data-id]")?.dataset.id;
+  if (a === "toggle") { openId = openId === rowId ? null : rowId; renderList(); return; }
+  if (a === "pick") { selected.has(rowId) ? selected.delete(rowId) : selected.add(rowId); renderList(); return; }
+  if (a === "opensession") { const s = sessions.find((x) => x.id === b.dataset.sid); if (s) { switchSession(s); setListMode("session"); toast(`Session « ${s.name} » ouverte`); } return; }
   const it = itemOf(b); if (!it) return;
-  const a = b.dataset.act;
-  if (a === "toggle") { openId = openId === it.id ? null : it.id; renderList(); return; }
   if (a === "plus") it.qty += 1;
   else if (a === "minus") { if (it.qty <= 1) return; it.qty -= 1; }
   else if (a === "ed") it.firstEd = !it.firstEd;
@@ -682,11 +784,78 @@ $("listSearch").addEventListener("input", (e) => { clearTimeout(searchT); search
 $("listSort").addEventListener("change", (e) => { sortBy = e.target.value; renderList(); });
 $("listFilter").addEventListener("change", (e) => { filter = e.target.value; renderList(); });
 $("statTodoBox").addEventListener("click", () => { filter = filter === "todo" ? "all" : "todo"; $("listFilter").value = filter; renderList(); });
+function setListMode(m) {
+  listMode = m; openId = null; selecting = false; selected.clear();
+  $("listMode").querySelectorAll(".seg").forEach((s) => s.classList.toggle("on", s.dataset.mode === m));
+  renderList(); window.scrollTo(0, 0);
+}
+$("listMode").addEventListener("click", (e) => { const b = e.target.closest("[data-mode]"); if (b) setListMode(b.dataset.mode); });
 
-/* ----- "Top de la session": most valuable cards and value per expansion ----- */
-function renderInsights() {
+/* ----- grouped actions ----- */
+$("selectBtn").addEventListener("click", () => { selecting = !selecting; selected.clear(); openId = null; renderList(); });
+function renderBulkBar() {
+  const on = selecting && listMode === "session";
+  $("bulkBar").hidden = !on; document.body.classList.toggle("bulk-on", on);
+  if (!on) return;
+  const n = selected.size;
+  $("bulkCount").textContent = `${n} sélectionnée${n > 1 ? "s" : ""}`;
+  $("bulkBar").querySelectorAll(".bulk-actions button").forEach((b) => (b.disabled = !n));
+  $("bulkBar").querySelector('[data-bulk="all"]').textContent = n && n === visibleItems(items).length ? "Aucune" : "Tout";
+}
+const picked = () => items.filter((x) => selected.has(x.id));
+function openBulk(title, html) { $("bulkTitle").textContent = title; $("bulkBody").innerHTML = html; $("bulkSheet").hidden = false; }
+const closeBulk = () => ($("bulkSheet").hidden = true);
+function endBulk(msg) { closeBulk(); selected.clear(); saveItems(); renderLast(); if (msg) toast(msg); }
+let bulkDelArmed = 0;
+$("bulkBar").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-bulk]"); if (!b) return;
+  const n = selected.size, act = b.dataset.bulk;
+  if (act === "done") { selecting = false; selected.clear(); renderList(); return; }
+  if (act === "all") { const vis = visibleItems(items); if (n && n === vis.length) selected.clear(); else vis.forEach((x) => selected.add(x.id)); renderList(); return; }
+  if (!n) return;
+  if (act === "cond") openBulk(`État de ${n} carte${n > 1 ? "s" : ""}`, `<div class="chips big">${COND.map((c) => `<button class="chip" data-set-cond="${c}">${c}</button>`).join("")}</div>`);
+  if (act === "comment") openBulk(`Commentaire de ${n} carte${n > 1 ? "s" : ""}`, `<form id="bulkCommentForm" class="acc-form"><input id="bulkComment" placeholder="ex. CM40-01 (vide pour effacer)"><button class="btn primary wide" type="submit">Appliquer</button></form>`);
+  if (act === "move") openBulk(`Déplacer ${n} carte${n > 1 ? "s" : ""} vers…`, `<div class="slist">${sessions.filter((s) => s !== current).map((s) => `<button class="sess-link" data-move="${s.id}"><span>${esc(s.name)}</span><span class="muted small">${sessionStats(s).n} cartes</span>${ico("chev")}</button>`).join("")}<button class="btn primary wide" data-move="new">${ico("plus")} Nouvelle session</button></div>`);
+  if (act === "del") {
+    if (Date.now() - bulkDelArmed > 4000) { bulkDelArmed = Date.now(); b.querySelector("span").textContent = "Confirmer ?"; setTimeout(() => (b.querySelector("span").textContent = "Supprimer"), 4000); return; }
+    bulkDelArmed = 0; b.querySelector("span").textContent = "Supprimer";
+    items = items.filter((x) => !selected.has(x.id)); endBulk(`${n} carte${n > 1 ? "s" : ""} supprimée${n > 1 ? "s" : ""}`);
+  }
+});
+$("bulkClose").addEventListener("click", closeBulk);
+$("bulkSheet").addEventListener("click", (e) => {
+  if (e.target === $("bulkSheet")) return closeBulk();
+  const c = e.target.closest("[data-set-cond]");
+  if (c) { picked().forEach((it) => (it.condition = c.dataset.setCond)); return endBulk(`État ${c.dataset.setCond} appliqué`); }
+  const m = e.target.closest("[data-move]");
+  if (m) {
+    let target = sessions.find((s) => s.id === m.dataset.move);
+    if (m.dataset.move === "new") { target = newSession(); sessions.unshift(target); }
+    if (!target) return;
+    const moving = picked();
+    for (const it of moving) {
+      const twin = target.items.find((x) => mergeKey(x) === mergeKey(it));
+      if (twin) twin.qty += it.qty; else target.items.unshift(it);
+    }
+    target.updatedAt = Date.now();
+    items = items.filter((x) => !selected.has(x.id));
+    if (lastAdded && selected.has(lastAdded.id)) lastAdded = null;
+    endBulk(`${moving.length} carte${moving.length > 1 ? "s" : ""} déplacée${moving.length > 1 ? "s" : ""} vers « ${target.name} »`);
+  }
+});
+$("bulkSheet").addEventListener("submit", (e) => {
+  if (e.target.id !== "bulkCommentForm") return;
+  e.preventDefault();
+  const v = $("bulkComment").value.trim();
+  picked().forEach((it) => (it.comment = v));
+  endBulk(v ? "Commentaire appliqué" : "Commentaires effacés");
+});
+
+/* ----- top of the session (or of the collection) ----- */
+function renderInsights(src = items, coll = false) {
   const box = $("insights");
-  const priced = items.map((it) => ({ it, p: cmPrice(it.cm) })).filter((x) => x.p && x.p.lo === x.p.hi);
+  $("insightsTitle").textContent = coll ? "Top de la collection" : "Top de la session";
+  const priced = src.map((it) => ({ it, p: cmPrice(it.cm) })).filter((x) => x.p && x.p.lo === x.p.hi);
   box.hidden = priced.length < 2;
   if (box.hidden) return;
   const top = [...priced].sort((a, b) => b.p.lo - a.p.lo).slice(0, 10);
@@ -761,9 +930,9 @@ $("sessionTitle").addEventListener("change", (e) => {
 /* ================= export ================= */
 const HEAD = ["cardmarketId", "quantity", "name", "set", "setCode", "cn", "condition", "language", "isFirstEd", "isSigned", "price", "comment", "nameDE", "nameES", "nameFR", "nameIT", "rarity", "listedAt"];
 const q = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
-function buildCsv() {
+function buildCsv(list = listSource()) {
   const rows = new Map();
-  for (const it of items) {
+  for (const it of list) {
     if (!it.rarity) continue;
     const id = typeof it.cm === "number" ? it.cm : "";
     let price = it.price;
@@ -780,7 +949,7 @@ function buildCsv() {
 $("exportBtn").addEventListener("click", async () => {
   const { csv, count } = buildCsv();
   if (!count) { toast("Rien à exporter (choisis la rareté des cartes en orange)."); return; }
-  const slug = current.name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+  const slug = (listMode === "collection" ? "ma collection" : current.name).normalize("NFD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
   const name = `cardmarket-${slug || "scan"}.csv`;
   const file = new File(["﻿" + csv], name, { type: "text/csv" });
   try {
@@ -1052,7 +1221,7 @@ if (sb) {
 }
 
 /* ================= boot ================= */
-bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount(); loadData();
+bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount(); renderStockInfo(); loadData();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers

@@ -162,6 +162,38 @@ input::placeholder{color:var(--faint)}
 .mini-select span{position:absolute;left:12px;top:6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);pointer-events:none}
 .mini-select select{padding-top:20px;padding-bottom:6px;min-height:50px;font-size:14px;text-overflow:ellipsis}
 #listCount{margin:0}
+.title-input.static{margin:0;padding:6px 0;border:0}
+/* stock badges */
+.tag.stock{color:#8fc1ff;border-color:rgba(110,168,255,.4);background:rgba(110,168,255,.1)}
+.stock-pill{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;margin-top:4px;font-size:12px;font-weight:700;color:#8fc1ff;background:rgba(110,168,255,.12);border:1px solid rgba(110,168,255,.35);border-radius:999px;padding:3px 9px}
+.stock-pill .ico{width:13px;height:13px}
+.stock-line{margin:0;display:flex;align-items:center;gap:8px;font-size:13px;color:#8fc1ff;background:rgba(110,168,255,.1);border-radius:var(--r-sm);padding:8px 10px}
+.stock-line .ico{width:16px;height:16px}
+.fly-stock{font-size:12px;font-weight:700;background:rgba(0,0,0,.18);border-radius:999px;padding:2px 8px;margin-top:2px}
+/* collection detail */
+.edit.coll{grid-template-columns:1fr}
+.edit .full-w{justify-self:start}
+.sess-link{width:100%;justify-content:flex-start;gap:10px;text-align:left;font-weight:500;background:var(--surface-2);min-height:48px}
+.sess-link span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* selection mode */
+.pick{width:24px;height:24px;flex:none;border-radius:50%;border:2px solid var(--line-2);display:inline-flex;align-items:center;justify-content:center;color:var(--gold-ink)}
+.item.selected{border-color:var(--gold)}
+.item.selected .pick{background:var(--gold);border-color:var(--gold)}
+.item.selected .pick .ico{width:16px;height:16px;stroke-width:3}
+.item.selected .pick .ico rect{display:none}
+#selectBtn{color:var(--muted)}
+.selecting #selectBtn{background:var(--gold);color:var(--gold-ink);border-color:var(--gold)}
+.bulkbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabs-h) + 10px + env(safe-area-inset-bottom,0px));width:calc(100% - 20px);max-width:620px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:20px;padding:10px 12px;z-index:20;box-shadow:0 14px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:8px}
+.bulk-top{display:flex;align-items:center;gap:8px}
+.bulk-top strong{flex:1}
+.bulk-top .link-btn{min-height:36px}
+.bulk-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.bulk-actions button{flex-direction:column;gap:4px;min-height:58px;padding:6px 4px;font-size:12px;background:var(--surface);border-radius:12px}
+.bulk-actions .ico{width:20px;height:20px}
+.bulk-actions .danger-txt{color:var(--bad)}
+body.bulk-on main{padding-bottom:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px) + 150px)}
+.bulk-body{display:flex;flex-direction:column;gap:10px;overflow-y:auto}
+.chips.big .chip{min-height:48px;padding:12px 18px;font-size:15px}
 #statTodoBox{cursor:pointer}
 /* top of the session */
 .insights summary{list-style:none;display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;min-height:28px}
