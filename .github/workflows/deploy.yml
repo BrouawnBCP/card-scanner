@@ -73,3 +73,21 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Nouvelle version en ligne : message dans le salon #nouveautés du Discord (seulement si APP_VERSION a changé)
+  announce:
+    needs: deploy
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Annonce Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          COMMITS: ${{ toJSON(github.event.commits) }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          export OLD_VERSION=$(git show "$BEFORE:app/app.js" 2>/dev/null | grep -oP 'APP_VERSION = "\K\d+' || true)
+          python3 tools/announce_release.py
