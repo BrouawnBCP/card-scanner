@@ -473,7 +473,9 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .scan-modes .game-mode .seg{flex:0 0 auto;width:52px;padding:6px}
 .scan-modes #camMode{flex:1}
 .game-ico{width:24px;height:24px;display:block;flex:none;object-fit:contain}
-.game-ico.ygo{width:18px;height:26px;border-radius:2px;background:url(icons/games/yugioh.png) 50% 50%/240% auto no-repeat;box-shadow:0 0 0 1px rgba(255,170,60,.5)}
+.game-ico.ygo{width:18px;height:26px;border-radius:2px;overflow:hidden;position:relative;box-shadow:0 0 0 1px rgba(255,170,60,.5)}
+/* the picture is the card back on a grey square: a real image (more reliable than a CSS background on iPhone), shifted so only the card shows */
+.game-ico.ygo img{position:absolute;left:-6px;top:-2px;width:30px;height:30px;max-width:none;display:block}
 .game-mode .seg:not(.on) .game-ico{opacity:.55;filter:saturate(.6)}
 .manual-wrap summary{min-height:44px}
 .last{gap:8px;padding:12px}
