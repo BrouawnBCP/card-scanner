@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "16";
+const APP_VERSION = "17";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -287,33 +287,83 @@ function signature(r) {
 }
 const sigDiff = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; };
 
+// iOS home-screen apps often fail to hand the camera back once it has been released. So leaving the
+// Scanner only pauses reading and keeps the camera open for a while; it is released after 2 minutes
+// away, when the app goes to the background, or when the person presses Pause.
+const KEEP_CAMERA_MS = 120000;
+let starting = false, loopToken = 0, releaseTimer = null;
+const liveTrack = () => { const t = stream?.getVideoTracks()[0]; return t && t.readyState === "live" ? t : null; };
+function resetVideo() {
+  try { video.pause(); } catch {}
+  video.srcObject = null; video.removeAttribute("src");
+  try { video.load(); } catch {}
+}
+async function waitForFrames(ms = 4000) {
+  const t0 = Date.now();
+  while (!video.videoWidth && Date.now() - t0 < ms) await sleep(100);
+  if (!video.videoWidth) throw Object.assign(new Error("no frames"), { name: "NoFrames" });
+}
 async function startCamera() {
   if (!DATA) { toast("La base de cartes charge encore…"); return; }
+  if (starting) return;
+  starting = true;
+  clearTimeout(releaseTimer);
   try {
     if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); }
     audioCtx?.resume?.();
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } } });
-    video.srcObject = stream; await video.play();
-    try { const tr = stream.getVideoTracks()[0]; const caps = tr.getCapabilities?.() || {}; if (caps.focusMode?.includes("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch {}
-    try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
-    $("torchBtn").disabled = false;
-    if (settings.torch) setTorch(true, true);
+    if (liveTrack()) {
+      // camera still open (we only left the Scanner for a moment): just resume
+      if (video.srcObject !== stream) video.srcObject = stream;
+      await video.play().catch(() => {});
+      await waitForFrames(1500).catch(async () => { await openCamera(); });
+    } else {
+      await openCamera();
+    }
   } catch (e) {
+    console.warn(e);
     stopCamera(false);
-    setStatus(e && e.name === "NotAllowedError" ? "Accès à la caméra refusé. Autorise-le dans Réglages › Safari › Caméra." : "Caméra indisponible sur cet appareil. Utilise « Photo » ou tape le code.");
-    return;
+    setStatus(e && e.name === "NotAllowedError"
+      ? "Accès à la caméra refusé. Autorise-le dans Réglages › Safari › Caméra."
+      : "La caméra ne répond pas. Appuie sur le bouton pour réessayer.");
+    starting = false; return;
   }
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+  $("torchBtn").disabled = false;
+  if (settings.torch && !torchOn) setTorch(true, true);
   try {
     setStatus("Chargement du moteur de lecture (une seule fois)…");
     await getEngine();
   } catch (e) {
-    console.warn(e); stopCamera(false);
+    console.warn(e); stopCamera(false); starting = false;
     setStatus("Le moteur de lecture n'a pas pu démarrer. Vérifie ta connexion puis réessaie."); return;
   }
+  starting = false;
+  if (view && view !== "scan") { pauseScan(); return; } // the person left while the camera was starting
   scanning = wantScan = true; reads = []; changed = true;
   setShutter(true);
   setStatus("Place une carte dans le cadre");
   loop();
+}
+async function openCamera() {
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null; resetVideo();
+  stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } } });
+  torchOn = false;
+  stream.getVideoTracks()[0]?.addEventListener("ended", () => { if (scanning) { stopCamera(true); setStatus("La caméra a été coupée. Appuie sur le bouton pour la relancer."); } });
+  video.srcObject = stream;
+  await video.play();
+  await waitForFrames();
+  try { const tr = stream.getVideoTracks()[0]; const caps = tr.getCapabilities?.() || {}; if (caps.focusMode?.includes("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch {}
+}
+/** Leaving the Scanner: stop reading, keep the camera open for a quick return. */
+function pauseScan() {
+  scanning = false; loopToken++;
+  try { video.pause(); } catch {}
+  if (torchOn) { const keep = settings.torch; setTorch(false, true).then(() => { settings.torch = keep; store.set("cs-settings", settings); }); }
+  try { wakeLock?.release(); } catch {} wakeLock = null;
+  setShutter(false);
+  clearTimeout(releaseTimer);
+  releaseTimer = setTimeout(() => { if (!scanning) stopCamera(true); }, KEEP_CAMERA_MS);
 }
 function setShutter(on) {
   const b = $("startBtn"); b.classList.toggle("on", on);
@@ -323,7 +373,7 @@ function setShutter(on) {
 /* ----- flash (torch). iOS 17+ accepts the "torch" constraint but may not report it back, so we keep our own state. */
 let torchOn = false;
 async function setTorch(on, quiet = false) {
-  const tr = stream?.getVideoTracks()[0];
+  const tr = liveTrack();
   if (!tr) return;
   try {
     await tr.applyConstraints({ advanced: [{ torch: on }] });
@@ -338,16 +388,18 @@ async function setTorch(on, quiet = false) {
 }
 $("torchBtn").addEventListener("click", () => setTorch(!torchOn));
 function stopCamera(keepWanted = false) {
-  // stopping the camera turns the flash off; settings.torch is kept so it comes back on next start
+  // releasing the camera turns the flash off; settings.torch is kept so it comes back on next start
+  clearTimeout(releaseTimer); loopToken++;
   torchOn = false; $("torchBtn").classList.remove("on"); $("torchBtn").disabled = true;
   scanning = false; if (!keepWanted) wantScan = false;
-  stream?.getTracks().forEach((t) => t.stop()); stream = null; video.srcObject = null;
+  stream?.getTracks().forEach((t) => t.stop()); stream = null; resetVideo();
   try { wakeLock?.release(); } catch {} wakeLock = null;
   setShutter(false);
   if (!keepWanted) setStatus("En pause");
 }
 async function loop() {
-  while (scanning) {
+  const me = ++loopToken; // a newer loop (after a quick pause/resume) replaces this one
+  while (scanning && me === loopToken) {
     try { await scanFrame(); } catch (e) { console.warn(e); await sleep(300); }
     await sleep(0);
   }
@@ -372,8 +424,9 @@ async function scanFrame() {
   const k = zone.height / zh, textH = r.h * 0.017 * k;
   // try first the line under the artwork on the right, then the rest
   const prefer = (b) => Math.abs((b.y + b.h / 2) / zone.height - 0.3) + (b.x + b.w > zone.width * 0.7 ? 0 : 0.3);
+  const token = loopToken;
   const res = await readCodes(zone, { textH, prefer, maxLines: 5 });
-  if (!scanning) return;
+  if (!scanning || token !== loopToken) return;
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
@@ -988,7 +1041,7 @@ function showView(v) {
   $("tabs").hidden = v === "auth";
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.view === v));
   window.scrollTo(0, 0);
-  if (v !== "scan" && scanning) stopCamera(true);
+  if (v !== "scan" && scanning) pauseScan();
   if (v === "scan" && wantScan && !scanning) startCamera();
   if (v === "home") renderHome();
 }
@@ -1011,7 +1064,7 @@ function updateHomeSync(state) {
   $("homeSyncTxt").textContent = !user ? "Sans compte" : state === "busy" ? "Synchro…" : state === "err" ? "Synchro en échec" : "Synchronisé";
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && scanning) stopCamera(true);
+  if (document.hidden && (scanning || stream)) stopCamera(true); // app in the background: release the camera
   else if (!document.hidden && wantScan && !scanning && !$("view-scan").hidden) startCamera();
 });
 $("startBtn").addEventListener("click", () => scanning ? stopCamera() : startCamera());
