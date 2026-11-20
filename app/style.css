@@ -458,6 +458,6 @@ body.bulk-on main{padding-bottom:calc(var(--tabs-h) + env(safe-area-inset-bottom
 .ph-code{font-size:9px;line-height:1.2}
 .tiles-2 .tile-txt span{white-space:normal}
 /* numbers and fields that cannot wrap: the text shrinks to fit */
-.stat-v{white-space:nowrap;overflow:visible;text-overflow:clip;font-size:clamp(14px,4.4vw,19px)}
-.title-input{text-overflow:clip;font-size:clamp(17px,5.2vw,24px)}
+.stat-v{white-space:nowrap;overflow:hidden;text-overflow:clip;display:block} /* app.js fitText() shrinks the number until it fits */
+textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:var(--ink);appearance:none;-webkit-appearance:none;white-space:pre-wrap;overflow-wrap:anywhere;font-size:clamp(19px,6vw,24px)}
 .mini-select select{text-overflow:clip}

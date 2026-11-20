@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=38">
-<link rel="stylesheet" href="theme-galaxy.css?v=38">
+<link rel="stylesheet" href="style.css?v=39">
+<link rel="stylesheet" href="theme-galaxy.css?v=39">
 </head>
 <body>
 
@@ -211,7 +211,7 @@
     </div>
     <header class="list-head" id="listHead">
       <div class="title-box">
-        <input id="sessionTitle" class="title-input" aria-label="Nom de la session" maxlength="60">
+        <textarea id="sessionTitle" class="title-input" aria-label="Nom de la session" maxlength="60" rows="1" spellcheck="false"></textarea>
         <button class="icon-btn sm" id="renameBtn" type="button" aria-label="Renommer la session" title="Renommer"><svg class="ico sm"><use href="#i-pencil"/></svg></button>
       </div>
       <h1 class="title-input static" id="collTitle" hidden>Ma collection</h1>
@@ -435,6 +435,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=38"></script>
+<script type="module" src="app.js?v=39"></script>
 </body>
 </html>

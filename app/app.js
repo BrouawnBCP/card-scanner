@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "38";
+const APP_VERSION = "39";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1094,7 +1094,7 @@ function renderList() {
   $("tabCount").textContent = curTotal; $("tabCount").classList.toggle("zero", !curTotal);
   $("sessionTitle").closest(".title-box").hidden = coll; $("collTitle").hidden = !coll;
   $("selectBtn").querySelector("span").textContent = selecting ? "Terminer" : "Sélectionner";
-  if (!coll && document.activeElement !== $("sessionTitle")) $("sessionTitle").value = current.name;
+  if (!coll && document.activeElement !== $("sessionTitle")) { $("sessionTitle").value = current.name; growTitle(); }
   $("sessionDates").hidden = coll;
   if (!coll) {
     const fmt = (t, o) => new Date(t).toLocaleString("fr-FR", o);
@@ -1108,6 +1108,7 @@ function renderList() {
   $("statValue").textContent = priced ? eur(value).replace(/\s?€/, " €") : "—";
   $("statValueL").textContent = (ownN && ownN >= total * 0.5 ? "valeur (tes prix)" : "cote estimée") + (priced && priced < total ? ` ${priced}/${total}` : "");
   $("statTodo").textContent = todo; $("statTodoBox").classList.toggle("has", todo > 0);
+  fitText();
   $("exportNote").hidden = !todo;
   $("exportNote").textContent = `${todo} carte${todo > 1 ? "s" : ""} sans rareté : choisis-la pour qu'elle${todo > 1 ? "s soient exportées" : " soit exportée"}.`;
   const shown = visibleItems(src);
@@ -1236,7 +1237,20 @@ $("wipeBtn").addEventListener("click", () => {
   }
 });
 $("renameBtn").addEventListener("click", () => { const i = $("sessionTitle"); i.focus(); i.select(); });
-$("sessionTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+$("sessionTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } });
+$("sessionTitle").addEventListener("input", growTitle);
+/** The session name wraps on as many lines as it needs (never cut). */
+function growTitle() { const t = $("sessionTitle"); t.style.height = "auto"; if (t.scrollHeight) t.style.height = t.scrollHeight + 2 + "px"; } // + its 1px borders
+/** Numbers that cannot wrap (stat boxes): shrink the font until they fit their box. */
+function fitText() {
+  for (const el of document.querySelectorAll(".stat-v")) {
+    if (!el.offsetParent) continue;
+    el.style.fontSize = "";
+    let fs = parseFloat(getComputedStyle(el).fontSize);
+    while (el.scrollWidth > el.clientWidth + 1 && fs > 9) { fs -= 0.5; el.style.fontSize = fs + "px"; }
+  }
+}
+window.addEventListener("resize", () => { fitText(); growTitle(); });
 
 /* ----- Historique: every session, newest first, grouped by day ----- */
 let histRename = null, histDel = null;
@@ -1547,6 +1561,7 @@ function showView(v) {
   if (v === "photos") renderPhotos();
   if (v === "scan" && wantScan && !scanning) startCamera();
   if (v === "home") renderHome();
+  fitText(); if (v === "list") growTitle();
 }
 $("tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (b) showView(b.dataset.view); });
 $("view-home").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) showView(b.dataset.go); });
@@ -1560,6 +1575,7 @@ function renderHome() {
   let cards = 0, val = 0; for (const s of sessions) { const st = sessionStats(s); cards += st.n; val += st.v; }
   $("homeCards").textContent = cards;
   $("homeValue").textContent = val ? eur(val) : "—";
+  fitText();
   updateHomeSync();
 }
 function updateHomeSync(state) {
