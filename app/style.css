@@ -461,3 +461,32 @@ body.bulk-on main{padding-bottom:calc(var(--tabs-h) + env(safe-area-inset-bottom
 .stat-v{white-space:nowrap;overflow:hidden;text-overflow:clip;display:block} /* app.js fitText() shrinks the number until it fits */
 textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:var(--ink);appearance:none;-webkit-appearance:none;white-space:pre-wrap;overflow-wrap:anywhere;font-size:clamp(19px,6vw,24px)}
 .mini-select select{text-overflow:clip}
+
+/* ----- Scanner: the whole page fits the screen, no scrolling (the camera area takes what is left) ----- */
+#view-scan{gap:10px;height:calc(100dvh - env(safe-area-inset-top,0px) - var(--tabs-h) - env(safe-area-inset-bottom,0px) - 28px);min-height:480px}
+#view-scan > *{flex:none}
+#view-scan > .stage{flex:1 1 0;height:auto;min-height:250px}
+.scan-modes{display:flex;gap:8px;align-items:stretch}
+.scan-modes .game-mode{flex:0 0 auto}
+.scan-modes .game-mode .seg{flex:0 0 auto;width:52px;padding:6px}
+.scan-modes #camMode{flex:1}
+.game-ico{width:24px;height:24px;display:block;flex:none;object-fit:contain}
+.game-ico.ygo{width:18px;height:26px;border-radius:2px;background:url(icons/games/yugioh.png) 50% 50%/240% auto no-repeat;box-shadow:0 0 0 1px rgba(255,170,60,.5)}
+.game-mode .seg:not(.on) .game-ico{opacity:.55;filter:saturate(.6)}
+.manual-wrap summary{min-height:44px}
+.last{gap:8px;padding:12px}
+/* the card frame sits between the status line and the buttons, never under them */
+#view-scan .guide{top:46px;bottom:100px;height:auto;transform:translateX(-50%);max-height:calc(100% - 146px)}
+/* last card on the Scanner: compact, so the camera frame keeps its size */
+#view-scan .last{padding:10px 12px;gap:8px}
+#view-scan .last .thumb.lg{width:44px;height:64px}
+#view-scan .last .last-top{gap:10px;align-items:center}
+#view-scan .last .eyebrow{font-size:10px}
+#view-scan .last .name{font-size:15px;line-height:1.2}
+#view-scan .last .meta{font-size:12px}
+#view-scan .last .actions{padding-top:8px;gap:5px;flex-wrap:nowrap;align-items:center}
+#view-scan .last .actions .chip{min-height:32px;padding:6px 9px;font-size:12px;flex:none}
+#view-scan .last .actions .brand-btn{height:32px;min-width:40px;padding:0 6px;flex:none}
+#view-scan .last .actions .brand-btn img{width:18px;height:18px}
+#view-scan .last .actions .ebay-logo{width:38px}
+#view-scan .last .chips .chip{min-height:32px;padding:6px 10px}

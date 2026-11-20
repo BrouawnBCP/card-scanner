@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "39";
+const APP_VERSION = "40";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -961,9 +961,9 @@ function renderLast() {
     ${it.cands.length > 1 ? `${it.rarity ? "" : `<span class="ask">Quelle rareté ?</span>`}
       <div class="chips">${it.cands.map((c) => `<button class="chip ${c.rarity === it.rarity ? "on" : ""}" data-rar="${esc(c.rarity)}">${esc(c.rarity)}</button>`).join("")}</div>` : ""}
     <div class="actions">
-      ${gameOf(it) === "rb" ? "" : `<button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>`}
-      <button class="chip" data-act="plus">${ico("plus")} 1</button>
-      <button class="chip" data-act="undo">${ico("undo")} Annuler</button>
+      ${gameOf(it) === "rb" ? "" : `<button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}" aria-label="1re édition" title="1re édition">1re éd.</button>`}
+      <button class="chip" data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")} 1</button>
+      <button class="chip" data-act="undo" aria-label="Annuler le dernier ajout" title="Annuler">${ico("undo")}</button>
       ${marketLinks(it)}
     </div>`;
 }

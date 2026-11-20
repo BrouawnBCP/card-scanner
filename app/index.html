@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=39">
-<link rel="stylesheet" href="theme-galaxy.css?v=39">
+<link rel="stylesheet" href="style.css?v=40">
+<link rel="stylesheet" href="theme-galaxy.css?v=40">
 </head>
 <body>
 
@@ -144,13 +144,15 @@
       </button>
     </div>
 
-    <div class="segmented cam-mode game-mode" id="gameMode" role="tablist" aria-label="Jeu de cartes">
-      <button class="seg on" data-game="ygo" type="button">Yu-Gi-Oh</button>
-      <button class="seg" data-game="rb" type="button">Riftbound</button>
-    </div>
-    <div class="segmented cam-mode" id="camMode" role="tablist" aria-label="Mode de la caméra">
-      <button class="seg on" data-cam="scan" type="button"><svg class="ico sm"><use href="#i-scan"/></svg> Scan continu</button>
-      <button class="seg" data-cam="photo" type="button"><svg class="ico sm"><use href="#i-camera"/></svg> Photo</button>
+    <div class="scan-modes">
+      <div class="segmented cam-mode game-mode" id="gameMode" role="tablist" aria-label="Jeu de cartes">
+        <button class="seg on" data-game="ygo" type="button" aria-label="Yu-Gi-Oh" title="Yu-Gi-Oh"><span class="game-ico ygo" aria-hidden="true"></span></button>
+        <button class="seg" data-game="rb" type="button" aria-label="Riftbound" title="Riftbound"><img class="game-ico" src="icons/games/riftbound.svg" alt="" width="24" height="24"></button>
+      </div>
+      <div class="segmented cam-mode" id="camMode" role="tablist" aria-label="Mode de la caméra">
+        <button class="seg on" data-cam="scan" type="button"><svg class="ico sm"><use href="#i-scan"/></svg> Scan</button>
+        <button class="seg" data-cam="photo" type="button"><svg class="ico sm"><use href="#i-camera"/></svg> Photo</button>
+      </div>
     </div>
 
     <div class="stage" id="stage">
@@ -435,6 +437,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=39"></script>
+<script type="module" src="app.js?v=40"></script>
 </body>
 </html>
