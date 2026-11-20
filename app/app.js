@@ -1,5 +1,5 @@
-﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "29";
+/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "30";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -384,7 +384,6 @@ async function startCamera() {
   starting = false;
   if (view && view !== "scan") { pauseScan(); return; } // the person left while the camera was starting
   wantScan = true;
-  if (camMode === "photo") { enterPhotoMode(); return; } // camera on, no automatic reading
   scanning = true; reads = []; changed = true;
   setShutter(true);
   setStatus("Place une carte dans le cadre");
@@ -588,11 +587,13 @@ async function scanFrame() {
     const fromY = line ? zy + (line.box.y + line.box.h) / k : r.y + r.h * 0.76;
     const ed = await readEdition(r, fromY);
     const it = makeItem(m, { firstEd: ed.ed === true });
+    const shot = camMode === "photo" ? capturePhoto(r) : null; // picture taken right away, while the card is still in the frame
     commit(it, "scan");
+    if (shot) attachPhoto(shot, it, lastAdded?.id);
     last = { sig, key: m.key, itemId: lastAdded?.id, edPending: ed.ed ? 0 : 3, edFrom: (fromY - r.y) / r.h };
     changed = false; changedHits = 0; reads = []; sawEmpty = false;
     celebrate(it);
-    setStatus(`Ajoutée : <span class="code">${esc(m.code)}</span>${ed.ed ? " · 1re édition" : ""} — présente la suivante`);
+    setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span>${ed.ed ? " · 1re édition" : ""} — présente la suivante`);
   } else setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`);
 }
 /* ----- "1st Edition" mention: printed bottom-left, next to the 8-digit passcode ----- */
@@ -826,7 +827,11 @@ function cardImgId(it) {
   const e = list.find((x) => DATA.cards[x[0]][0] === it.nameEN) || list[0];
   return e ? DATA.cards[e[0]][2] || 0 : 0;
 }
+/** First photo taken of this card line, if it is on this phone. */
+const itemPhoto = (it) => { if (!it.photos?.length || !photoCache) return null; for (const id of it.photos) { const p = photoCache.find((x) => x.id === id); if (p) return p; } return null; };
 const thumb = (it, big = false) => {
+  const ph = itemPhoto(it);
+  if (ph) return `<span class="thumb ${big ? "lg" : ""} has-photo"><img src="${blobUrl(ph)}" alt="">${rarBadge(it.rarity)}<span class="cam-badge">${ico("camera")}${it.photos.length > 1 ? it.photos.length : ""}</span></span>`;
   const id = cardImgId(it);
   return `<span class="thumb ${big ? "lg" : ""}">${id ? `<img src="img/${id}.webp" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ""}${rarBadge(it.rarity)}</span>`;
 };
@@ -951,6 +956,7 @@ function visibleItems(list) {
     if (filter === "todo") return !it.rarity;
     if (filter === "gem") return !!gemPrice(it);
     if (filter === "instock") return !!stockOf(it);
+    if (filter === "photo") return !!it.photos?.length;
     if (filter === "notstock") return !stockOf(it);
     if (filter.startsWith("rar:")) return it.rarity && rarClass(it.rarity) === filter.slice(4);
     if (filter.startsWith("lang:")) return it.lang === filter.slice(5);
@@ -1036,6 +1042,7 @@ function editPanel(it) {
     <label>Prix de vente<input data-f="price" inputmode="decimal" placeholder="€" value="${esc(it.price)}"></label>
     <label>Commentaire<input data-f="comment" placeholder="—" value="${esc(it.comment)}"></label>
     ${stockLine(it)}
+    ${photoStrip(it)}
     ${marketLine(it)}
     <p class="full muted small scanned">Scannée le ${new Date(it.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} à ${new Date(it.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
     <div class="edit-row full">
@@ -1045,6 +1052,10 @@ function editPanel(it) {
       <button class="del" data-act="del" aria-label="Supprimer">${ico("trash")}</button>
     </div>
   </div>`;
+}
+function photoStrip(it) {
+  const ps = (it.photos || []).map((id) => photoCache?.find((p) => p.id === id)).filter(Boolean);
+  return ps.length ? `<div class="full photo-strip">${ps.map((p) => `<button type="button" class="ps" data-act="photo" data-photo="${p.id}"><img src="${blobUrl(p)}" alt="Photo"></button>`).join("")}</div>` : "";
 }
 function stockLine(it) {
   const s = stockOf(it);
@@ -1064,6 +1075,7 @@ $("list").addEventListener("click", (e) => {
   const a = b.dataset.act, rowId = b.closest("[data-id]")?.dataset.id;
   if (a === "toggle") { openId = openId === rowId ? null : rowId; renderList(); return; }
   if (a === "pick") { selected.has(rowId) ? selected.delete(rowId) : selected.add(rowId); renderList(); return; }
+  if (a === "photo") { openViewer(photoCache.findIndex((p) => p.id === b.dataset.photo)); return; }
   if (a === "opensession") { const s = sessions.find((x) => x.id === b.dataset.sid); if (s) { switchSession(s); setListMode("session"); toast(`Session « ${s.name} » ouverte`); } return; }
   const it = itemOf(b); if (!it) return;
   if (a === "plus") it.qty += 1;
@@ -1454,7 +1466,6 @@ document.addEventListener("visibilitychange", () => {
   else if (!document.hidden && wantScan && !scanning && !$("view-scan").hidden) startCamera();
 });
 $("startBtn").addEventListener("click", () => {
-  if (camMode === "photo") return liveTrack() && !starting && video.videoWidth ? takePhoto() : startCamera();
   scanning ? stopCamera() : startCamera();
 });
 
@@ -1467,24 +1478,19 @@ function renderCamMode() {
   $("galleryBtn").hidden = camMode !== "photo";
 }
 function enterPhotoMode() {
-  scanning = false; loopToken++; showHint(null); failStreak = 0;
-  setShutter(false);
-  $("startBtn").setAttribute("aria-label", "Prendre une photo");
-  setStatus("Mode photo : cadre la carte puis appuie sur le déclencheur");
-  if (!liveTrack()) setStatus("Mode photo : appuie sur le déclencheur pour lancer la caméra");
+  setStatus(scanning ? "Mode photo : chaque carte reconnue est photographiée et ajoutée" : "Mode photo : appuie sur le bouton pour lancer le scan avec photos");
 }
 $("camMode").addEventListener("click", (e) => {
   const b = e.target.closest("[data-cam]"); if (!b || b.dataset.cam === camMode) return;
   camMode = b.dataset.cam; settings.camMode = camMode; store.set("cs-settings", settings);
   renderCamMode();
   if (camMode === "photo") enterPhotoMode();
-  else if (liveTrack() && video.videoWidth) { scanning = wantScan = true; reads = []; changed = true; setShutter(true); setStatus("Place une carte dans le cadre"); loop(); }
-  else { setShutter(false); setStatus("Appuie sur le bouton pour lancer la caméra"); }
+  else setStatus(scanning ? "Place une carte dans le cadre" : "Appuie sur le bouton pour lancer la caméra");
 });
 let photoCache = null; // [{id, createdAt, thumb, blob, w, h, code, name, key}]
 async function loadPhotos() {
   try { photoCache = (await idb.photos()).sort((a, b) => b.createdAt - a.createdAt); } catch (e) { console.warn(e); photoCache = []; }
-  updatePhotoBadge();
+  updatePhotoBadge(); renderList(); renderLast(); // card lines can now show their own photos
 }
 const objUrls = new Map();
 const blobUrl = (p, which = "thumb") => { const k = p.id + which; if (!objUrls.has(k)) objUrls.set(k, URL.createObjectURL(p[which])); return objUrls.get(k); };
@@ -1498,35 +1504,30 @@ function updatePhotoBadge() {
   $("homePhotoSub").textContent = n ? `${n} photo${n > 1 ? "s" : ""}` : "Pour tes annonces";
 }
 const toBlob = (c, q = 0.92) => new Promise((res) => c.toBlob(res, "image/jpeg", q));
-/** Take a picture of the card in the frame (with a small margin), full camera resolution. */
-async function takePhoto() {
-  const r = guideInVideo(), m = 0.05;
+/** Picture of the card in the frame (small margin, full camera resolution), grabbed right now. */
+function capturePhoto(r = guideInVideo()) {
+  const m = 0.05;
   const x = Math.max(0, r.x - r.w * m), y = Math.max(0, r.y - r.h * m);
   const w = Math.min(video.videoWidth - x, r.w * (1 + 2 * m)), h = Math.min(video.videoHeight - y, r.h * (1 + 2 * m));
   const full = grab(video, x, y, w, h, 2400);
-  const thumbC = grab(full, 0, 0, full.width, full.height, 360);
   // shutter flash, driven by timers so it never stays white
   const snap = $("snap"); snap.style.transition = "none"; snap.style.opacity = "0.85";
   setTimeout(() => { snap.style.transition = "opacity .3s ease-out"; snap.style.opacity = "0"; }, 60);
   setTimeout(() => { snap.style.transition = "none"; snap.style.opacity = "0"; }, 450);
-  beep();
-  const p = { id: uid(), createdAt: Date.now(), w: full.width, h: full.height, blob: await toBlob(full, 0.92), thumb: await toBlob(thumbC, 0.8), code: "", name: "", key: "" };
-  try { await idb.putPhoto(p); } catch (e) { console.warn(e); toast("Impossible d'enregistrer la photo (mémoire du téléphone pleine ?)"); return; }
-  photoCache = [p, ...(photoCache || [])]; updatePhotoBadge(); bump($("galleryBtn"));
-  setStatus("Photo enregistrée — recherche du code de la carte…");
-  // Name the photo after the card: read the set code on the lower part of the picture.
+  return full;
+}
+/** Store the picture and link it to the card line it was taken for. */
+async function attachPhoto(full, it, itemId) {
   try {
-    const zone = grab(full, 0, full.height * 0.5, full.width, full.height * 0.5, 960);
-    const res = await readCodes(zone, { maxLines: 8, prefer: (b) => (b.w / zone.width > 0.5 ? 1 : 0) });
-    const mm = res.matches.find((z) => !z.unsure) || res.matches[0];
-    if (mm) {
-      const c = candidatesFor(mm.key)[0];
-      p.code = mm.code; p.key = mm.key; p.name = c ? (DATA.cards[c.card][1] || DATA.cards[c.card][0]) : "";
-      await idb.putPhoto(p);
-      setStatus(`Photo enregistrée : <span class="code">${esc(p.code)}</span> ${esc(p.name)}`);
-    } else setStatus("Photo enregistrée (code non lu)");
-  } catch (e) { console.warn(e); setStatus("Photo enregistrée"); }
-  if (view === "photos") renderPhotos();
+    const thumbC = grab(full, 0, 0, full.width, full.height, 360);
+    const p = { id: uid(), createdAt: Date.now(), w: full.width, h: full.height, blob: await toBlob(full, 0.92), thumb: await toBlob(thumbC, 0.8),
+      code: it.code, name: it.nameFR || it.nameEN || "", key: it.key, itemId: itemId || "", sessionId: current.id };
+    await idb.putPhoto(p);
+    photoCache = [p, ...(photoCache || [])]; updatePhotoBadge(); bump($("galleryBtn"));
+    const line = items.find((x) => x.id === itemId);
+    if (line) { line.photos = [...(line.photos || []), p.id]; saveItems(); renderLast(); }
+    if (view === "photos") renderPhotos();
+  } catch (e) { console.warn(e); toast("Photo non enregistrée (mémoire du téléphone pleine ?)"); }
 }
 $("galleryBtn").addEventListener("click", () => showView("photos"));
 
