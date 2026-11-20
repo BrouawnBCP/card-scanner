@@ -478,7 +478,11 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .manual-wrap summary{min-height:44px}
 .last{gap:8px;padding:12px}
 /* the card frame sits between the status line and the buttons, never under them */
-#view-scan .guide{top:44px;bottom:12px;height:auto;transform:translateX(-50%);max-height:none} /* large frame: the buttons may sit over the card, the reading uses the camera image, not the screen */
+/* large frame with the exact shape of a card (the reading looks for the code at fixed places of this frame):
+   as tall as the camera area allows, never wider than 72% of it (as before: the card stays far enough for the camera to focus). Centered like the original, so the "hit" animation keeps it in place.
+   The buttons may sit over the card: the reading uses the camera image, not the screen. */
+#view-scan .stage{container-type:size}
+#view-scan .guide{top:50%;bottom:auto;margin-top:14px;transform:translate(-50%,-50%);aspect-ratio:59/86;width:auto;height:70%;height:min(calc(100cqh - 64px),105cqw);max-width:none;max-height:none}
 /* last card on the Scanner: compact, so the camera frame keeps its size */
 #view-scan .last{padding:10px 12px;gap:8px}
 #view-scan .last .thumb.lg{width:44px;height:64px}
@@ -500,3 +504,8 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 #view-scan .scan-hint span{font-size:12px;line-height:1.3}
 #view-scan .last .last-set{display:none}
 #view-scan .controls .round-btn,#view-scan .shutter{opacity:.92}
+/* over the live video: no blur and no glow filters, they slow the camera preview on phones */
+#view-scan .status,#view-scan .round-btn,#view-scan .scan-hint{backdrop-filter:none;-webkit-backdrop-filter:none}
+#view-scan .status{background:rgba(6,8,20,.82)} #view-scan .round-btn{background:rgba(6,8,20,.7)} #view-scan .scan-hint{background:rgba(36,22,6,.94)}
+#view-scan .corner{filter:none}
+#view-scan .scanline{box-shadow:none}
