@@ -98,6 +98,9 @@ input::placeholder{color:var(--faint)}
 .meta .code{font-family:var(--f-mono);color:var(--gold);font-size:12.5px}
 .price{font:700 16px var(--f-mono);font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
 .price.range{font-size:13px;color:var(--muted)}
+.price.own{color:var(--gold)}
+.market-line{margin:0}
+.market-line strong{color:var(--ink);font-family:var(--f-mono)}
 .ask{font-size:13px;font-weight:600;color:var(--warn)}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{font:600 13px/1 var(--f-body);padding:9px 12px;min-height:36px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;gap:6px}

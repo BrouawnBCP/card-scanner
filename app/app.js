@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "23";
+const APP_VERSION = "24";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -679,11 +679,23 @@ function rarBadge(r) {
   return `<span class="rar ${cls}" title="${esc(r)}">${esc(s)}</span>`;
 }
 const num = (n) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const priceHtml = (cm) => {
-  const p = cmPrice(cm);
+/** The card's own selling price (from an imported listing or typed in), else null. */
+const ownPrice = (it) => { const v = parseFloat(String(it?.price ?? "").replace(",", ".")); return Number.isFinite(v) && v > 0 ? v : null; };
+/** Price shown and counted for a card: its own selling price first, else the Cardmarket trend. */
+const itemPrice = (it) => { const o = ownPrice(it); if (o != null) return { lo: o, hi: o, own: true }; const p = cmPrice(it.cm); return p ? { ...p, own: false } : null; };
+const priceHtml = (it) => {
+  const p = itemPrice(it);
   if (!p) return `<span class="price range">—</span>`;
-  return p.lo === p.hi ? `<span class="price">${esc(eur(p.lo))}</span>` : `<span class="price range" title="Plusieurs versions possibles">${num(p.lo)}–${num(p.hi)} €</span>`;
+  if (p.own) return `<span class="price own" title="Ton prix de vente">${esc(eur(p.lo))}</span>`;
+  return p.lo === p.hi ? `<span class="price" title="Cote tendance Cardmarket">${esc(eur(p.lo))}</span>` : `<span class="price range" title="Plusieurs versions possibles">${num(p.lo)}–${num(p.hi)} €</span>`;
 };
+/** Line in the detail panel: Cardmarket trend next to the own price. */
+function marketLine(it) {
+  const p = cmPrice(it.cm);
+  if (!p) return "";
+  const t = p.lo === p.hi ? eur(p.lo) : `${num(p.lo)}–${num(p.hi)} €`;
+  return `<p class="full muted small market-line">Cote Cardmarket (tendance) : <strong>${esc(t)}</strong>${ownPrice(it) != null ? ` · ton prix : <strong>${esc(eur(ownPrice(it)))}</strong>` : ""}</p>`;
+}
 const ico = (id) => `<svg class="ico"><use href="#i-${id}"/></svg>`;
 /** YGOPRODeck id of the item's card (its thumbnail is img/<id>.webp). */
 function cardImgId(it) {
@@ -715,7 +727,7 @@ function renderLast() {
         <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
         ${(() => { const s = stockOf(it); return s ? `<span class="stock-pill">${ico("stack")} Déjà ${s.n} en stock${s.lang && s.lang !== s.n ? ` (${s.lang} ${LANG_SHORT[it.lang] || ""})` : ""}</span>` : ""; })()}
       </div>
-      ${priceHtml(it.cm)}
+      ${priceHtml(it)}
     </div>
     ${it.cands.length > 1 ? `${it.rarity ? "" : `<span class="ask">Quelle rareté ?</span>`}
       <div class="chips">${it.cands.map((c) => `<button class="chip ${c.rarity === it.rarity ? "on" : ""}" data-rar="${esc(c.rarity)}">${esc(c.rarity)}</button>`).join("")}</div>` : ""}
@@ -740,7 +752,7 @@ let filter = "all", sortBy = "recent", query = "", openId = null;
 let listMode = "session", selecting = false; const selected = new Set();
 const PAGE = 150; let showMax = PAGE; // long lists are drawn 150 lines at a time
 const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]/g, "");
-const unitPrice = (it) => { const p = cmPrice(it.cm); return p ? (p.lo + p.hi) / 2 : -1; };
+const unitPrice = (it) => { const p = itemPrice(it); return p ? (p.lo + p.hi) / 2 : -1; };
 const rarClass = (r) => (RAR[r] || [null, "r-c"])[1];
 
 /* ----- my Cardmarket stock (imported CSV, kept on this device) ----- */
@@ -844,7 +856,8 @@ function renderList() {
   const src = listSource();
   const total = src.reduce((n, x) => n + x.qty, 0);
   let value = 0, priced = 0;
-  for (const x of src) { const p = cmPrice(x.cm); if (p && p.lo === p.hi) { value += p.lo * x.qty; priced += x.qty; } }
+  for (const x of src) { const p = itemPrice(x); if (p && p.lo === p.hi) { value += p.lo * x.qty; priced += x.qty; } }
+  const ownN = src.reduce((n, x) => n + (ownPrice(x) != null ? x.qty : 0), 0);
   const todo = src.filter((x) => !x.rarity).length;
   const curTotal = items.reduce((n, x) => n + x.qty, 0);
   $("tabCount").textContent = curTotal; $("tabCount").classList.toggle("zero", !curTotal);
@@ -862,7 +875,7 @@ function renderList() {
   $("wipeBtn").querySelector("span").textContent = wipeArmed ? (coll ? "Confirmer : tout supprimer ?" : "Confirmer : vider la session ?") : (coll ? `Tout supprimer (${total} carte${total > 1 ? "s" : ""}, toutes sessions)` : "Vider cette session");
   $("statCards").textContent = total;
   $("statValue").textContent = priced ? eur(value).replace(/\s?€/, " €") : "—";
-  $("statValueL").textContent = priced && priced < total ? `cote (${priced}/${total})` : "cote estimée";
+  $("statValueL").textContent = (ownN && ownN >= total * 0.5 ? "valeur (tes prix)" : "cote estimée") + (priced && priced < total ? ` ${priced}/${total}` : "");
   $("statTodo").textContent = todo; $("statTodoBox").classList.toggle("has", todo > 0);
   $("exportNote").hidden = !todo;
   $("exportNote").textContent = `${todo} carte${todo > 1 ? "s" : ""} sans rareté : choisis-la pour qu'elle${todo > 1 ? "s soient exportées" : " soit exportée"}.`;
@@ -887,7 +900,7 @@ function renderList() {
           <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
         </span>
         <span class="row-side">
-          ${priceHtml(it.cm)}
+          ${priceHtml(it)}
           <span class="tags">${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}${stockTag(it)}${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span>${coll ? "" : `<span class="tag">${esc(it.condition)}</span>`}</span>
         </span>
       </button>
@@ -903,6 +916,7 @@ function editPanel(it) {
     <label>Prix de vente<input data-f="price" inputmode="decimal" placeholder="€" value="${esc(it.price)}"></label>
     <label>Commentaire<input data-f="comment" placeholder="—" value="${esc(it.comment)}"></label>
     ${stockLine(it)}
+    ${marketLine(it)}
     <p class="full muted small scanned">Scannée le ${new Date(it.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} à ${new Date(it.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
     <div class="edit-row full">
       <span class="qty"><button data-act="minus" aria-label="Retirer un exemplaire">${ico("minus")}</button><span>${it.qty}</span><button data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")}</button></span>
@@ -1160,7 +1174,7 @@ $("history").addEventListener("change", async (e) => {
 function renderInsights(src = items, coll = false) {
   const box = $("insights");
   $("insightsTitle").textContent = coll ? "Top de la collection" : "Top de la session";
-  const priced = src.map((it) => ({ it, p: cmPrice(it.cm) })).filter((x) => x.p && x.p.lo === x.p.hi);
+  const priced = src.map((it) => ({ it, p: itemPrice(it) })).filter((x) => x.p && x.p.lo === x.p.hi);
   box.hidden = priced.length < 2;
   if (box.hidden) return;
   const top = [...priced].sort((a, b) => b.p.lo - a.p.lo).slice(0, 10);
@@ -1182,12 +1196,12 @@ function renderInsights(src = items, coll = false) {
         <div class="bar-track"><span style="width:${Math.max(3, (v / max) * 100).toFixed(1)}%"></span></div></div>`).join("")}
       ${rest ? `<div class="bar muted small">+ ${sets.length - 8} autres extensions : ${esc(eur(rest))}</div>` : ""}
     </div>
-    <p class="muted small">Calculé sur les cartes dont la version exacte est connue (cote tendance Cardmarket).</p>`;
+    <p class="muted small">Calculé avec ton prix de vente quand il est renseigné, sinon la cote tendance Cardmarket de la version exacte.</p>`;
 }
 
 /* ================= sessions UI ================= */
 function sessionStats(s) {
-  let n = 0, v = 0; for (const x of s.items) { n += x.qty; const p = cmPrice(x.cm); if (p && p.lo === p.hi) v += p.lo * x.qty; }
+  let n = 0, v = 0; for (const x of s.items) { n += x.qty; const p = itemPrice(x); if (p && p.lo === p.hi) v += p.lo * x.qty; }
   return { n, v };
 }
 function renderSessionBar() {
