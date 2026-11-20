@@ -180,6 +180,8 @@ input::placeholder{color:var(--faint)}
 /* history */
 .view.hist .list-head,.view.hist .session-dates,.view.hist .stats,.view.hist .list-tools,.view.hist .list-filters,.view.hist #listCount,.view.hist #exportNote,.view.hist #list,.view.hist #empty,.view.hist #insights,.view.hist #wipeBtn{display:none!important}
 .history{display:flex;flex-direction:column;gap:8px}
+.hist-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.view.hist #moreBtn{display:none!important}
 .hday{margin:10px 2px 0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .hrow{display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:6px}
 .hrow.on{border-color:var(--gold);background:linear-gradient(90deg,var(--gold-soft),var(--surface) 60%)}

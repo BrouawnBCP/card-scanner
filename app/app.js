@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "22";
+const APP_VERSION = "23";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -24,10 +24,42 @@ function newSession(itemsIn = []) {
   return { id: uid(), createdAt: Date.now(), updatedAt: Date.now(), items: itemsIn,
     name: `${d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` };
 }
+// Sessions live in IndexedDB (room for many thousands of cards; localStorage holds about 5 MB).
+// Older versions kept them in localStorage: they are read once from there, then moved.
+const idb = {
+  db: null,
+  open() {
+    return (this.db ||= new Promise((res, rej) => {
+      const r = indexedDB.open("card-scanner", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    }));
+  },
+  async get(k) { const db = await this.open(); return new Promise((res, rej) => { const q = db.transaction("kv").objectStore("kv").get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); },
+  async set(k, v) { const db = await this.open(); return new Promise((res, rej) => { const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); }); },
+};
 let sessions = store.get("cs-sessions", null);
 if (!Array.isArray(sessions) || !sessions.length) sessions = [newSession(store.get("cs-items", []))]; // migrate the single list of v1–v4
 let current = sessions.find((s) => s.id === store.get("cs-current", "")) || sessions[0];
 let items = current.items;
+let dataReady = false; // true once the sessions saved in IndexedDB are loaded
+async function loadSessions() {
+  try {
+    const saved = await idb.get("sessions");
+    if (Array.isArray(saved) && saved.length) {
+      sessions = saved;
+      current = sessions.find((s) => s.id === store.get("cs-current", "")) || sessions[0];
+      items = current.items;
+    } else {
+      await idb.set("sessions", sessions); // first run of this version: move the localStorage copy
+    }
+    try { localStorage.removeItem("cs-sessions"); localStorage.removeItem("cs-items"); } catch {}
+  } catch (e) { console.warn("IndexedDB unavailable, staying on localStorage", e); idbBroken = true; }
+  dataReady = true;
+  renderList(); renderSessionBar(); renderLast(); if (view === "home") renderHome();
+  scheduleSync(300);
+}
+let idbBroken = false, persistT = null;
 function saveItems() {
   current.items = items; current.updatedAt = Date.now();
   persist();
@@ -35,8 +67,13 @@ function saveItems() {
   scheduleSync();
 }
 function persist() {
-  if (!store.set("cs-sessions", sessions) || !store.set("cs-current", current.id)) toast("Impossible d'enregistrer sur ce téléphone. Exporte ta liste.");
+  store.set("cs-current", current.id);
+  if (idbBroken) { if (!store.set("cs-sessions", sessions)) toast("Impossible d'enregistrer sur ce téléphone. Exporte ta liste."); return; }
+  clearTimeout(persistT);
+  persistT = setTimeout(() => idb.set("sessions", sessions).catch((e) => { console.warn(e); toast("Impossible d'enregistrer sur ce téléphone. Exporte ta liste."); }), 250);
 }
+// write immediately when the app is hidden or closed
+document.addEventListener("visibilitychange", () => { if (document.hidden && persistT && !idbBroken) { clearTimeout(persistT); persistT = null; idb.set("sessions", sessions).catch(() => {}); } });
 function switchSession(s) { current = s; items = s.items; lastAdded = null; saveItems(); renderLast(); }
 function startNewSession() {
   if (!items.length) { toast("Cette session est encore vide : continue de scanner dedans."); return; }
@@ -701,6 +738,7 @@ $("last").addEventListener("click", (e) => {
 
 let filter = "all", sortBy = "recent", query = "", openId = null;
 let listMode = "session", selecting = false; const selected = new Set();
+const PAGE = 150; let showMax = PAGE; // long lists are drawn 150 lines at a time
 const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]/g, "");
 const unitPrice = (it) => { const p = cmPrice(it.cm); return p ? (p.lo + p.hi) / 2 : -1; };
 const rarClass = (r) => (RAR[r] || [null, "r-c"])[1];
@@ -836,7 +874,9 @@ function renderList() {
   $("view-list").classList.toggle("selecting", selecting);
   renderInsights(src, coll);
   renderBulkBar();
-  $("list").innerHTML = shown.map((it) => {
+  $("moreBtn").hidden = shown.length <= showMax;
+  $("moreBtn").textContent = `Afficher ${Math.min(PAGE, shown.length - showMax)} de plus (${shown.length - showMax} restantes)`;
+  $("list").innerHTML = shown.slice(0, showMax).map((it) => {
     const isNew = !coll && Date.now() - it.createdAt < 1500, open = openId === it.id && !selecting, sel = selected.has(it.id);
     return `<div class="item ${it.rarity ? "" : "todo"} ${isNew ? "enter" : ""} ${sel ? "selected" : ""}" data-id="${esc(it.id)}">
       <button class="row-main" data-act="${selecting ? "pick" : "toggle"}" aria-expanded="${open}" ${selecting ? `aria-pressed="${sel}"` : ""}>
@@ -906,12 +946,13 @@ $("list").addEventListener("change", (e) => {
   saveItems(); renderLast();
 });
 let searchT;
-$("listSearch").addEventListener("input", (e) => { clearTimeout(searchT); searchT = setTimeout(() => { query = e.target.value; renderList(); }, 120); });
-$("listSort").addEventListener("change", (e) => { sortBy = e.target.value; renderList(); });
-$("listFilter").addEventListener("change", (e) => { filter = e.target.value; renderList(); });
+$("listSearch").addEventListener("input", (e) => { clearTimeout(searchT); searchT = setTimeout(() => { query = e.target.value; showMax = PAGE; renderList(); }, 120); });
+$("listSort").addEventListener("change", (e) => { sortBy = e.target.value; showMax = PAGE; renderList(); });
+$("listFilter").addEventListener("change", (e) => { filter = e.target.value; showMax = PAGE; renderList(); });
+$("moreBtn").addEventListener("click", () => { showMax += PAGE; renderList(); });
 $("statTodoBox").addEventListener("click", () => { filter = filter === "todo" ? "all" : "todo"; $("listFilter").value = filter; renderList(); });
 function setListMode(m) {
-  listMode = m; openId = null; selecting = false; selected.clear();
+  listMode = m; openId = null; selecting = false; selected.clear(); showMax = PAGE;
   $("listMode").querySelectorAll(".seg").forEach((s) => s.classList.toggle("on", s.dataset.mode === m));
   renderList(); window.scrollTo(0, 0);
 }
@@ -957,7 +998,7 @@ function dayLabel(t) {
 }
 function renderHistory() {
   const sorted = [...sessions].sort((a, b) => b.createdAt - a.createdAt);
-  let html = `<button class="btn primary wide" data-h="new">${ico("plus")} Nouvelle session</button>`, lastDay = "";
+  let html = `<div class="hist-actions"><button class="btn primary" data-h="new">${ico("plus")} Nouvelle session</button><label class="btn" title="Importer un export de stock Cardmarket ou PowerTools">${ico("share")} Importer un CSV<input type="file" id="importCsv" accept=".csv,text/csv" hidden></label></div>`, lastDay = "";
   for (const s of sorted) {
     const day = dayLabel(s.createdAt);
     if (day !== lastDay) { html += `<h3 class="hday">${esc(day.charAt(0).toUpperCase() + day.slice(1))}</h3>`; lastDay = day; }
@@ -1061,6 +1102,58 @@ $("bulkSheet").addEventListener("submit", (e) => {
   const v = $("bulkComment").value.trim();
   picked().forEach((it) => (it.comment = v));
   endBulk(v ? "Commentaire appliqué" : "Commentaires effacés");
+});
+
+/* ----- import a Cardmarket / PowerTools stock export as a new session ----- */
+const cleanCmName = (n) => String(n || "").replace(/\s*\(V\.\d+[^)]*\)\s*$/, "").replace(/^"+|"+$/g, "").trim();
+function itemFromCsv(r) {
+  const setCode = String(r.setCode || "").toUpperCase().replace(/-[A-Z]$/, ""), cn = String(r.cn || "").trim();
+  const key = `${setCode}-${cn}`;
+  const lang = LANGS.includes(r.language) ? r.language : settings.lang;
+  const cmId = parseInt(r.cardmarketId, 10) || 0;
+  const it = {
+    id: uid(), createdAt: Date.parse(r.listedAt) || Date.now(), key, code: `${setCode}-${REGION_OF[lang] || "EN"}${cn}`, prefix: setCode, cn,
+    lang, firstEd: String(r.isFirstEd).toLowerCase() === "true", condition: COND.includes(r.condition) ? r.condition : "NM",
+    comment: r.comment || "", qty: parseInt(r.quantity, 10) || 1, price: String(r.price || "").replace(",", "."), cands: [],
+  };
+  const cands = DATA?.prints[key] ? candidatesFor(key) : [];
+  const c = cands.find((x) => (Array.isArray(x.cm) ? x.cm.includes(cmId) : x.cm === cmId) && cmId)
+    || cands.find((x) => x.rarity === r.rarity) || (cands.length === 1 ? cands[0] : null);
+  if (c) {
+    applyCandidate(it, c);
+    // the card database lacks some French names: the export has them
+    if (cleanCmName(r.nameFR) && it.nameFR === it.nameEN) it.nameFR = cleanCmName(r.nameFR);
+  } else { it.card = -1; it.nameEN = cleanCmName(r.name); it.nameFR = cleanCmName(r.nameFR) || it.nameEN; it.set = r.set || setCode; }
+  it.rarity = r.rarity || it.rarity || "";
+  if (cmId) it.cm = cmId; // the export knows the exact Cardmarket product
+  return it;
+}
+function importListings(text) {
+  const rows = parseCsv(text.replace(/^﻿/, ""));
+  const head = (rows.shift() || []).map((h) => h.trim());
+  if (!head.includes("cardmarketId") || !head.includes("quantity")) throw new Error("format");
+  const its = rows.map((r) => itemFromCsv(Object.fromEntries(head.map((h, i) => [h, r[i]])))).filter((it) => it.qty > 0);
+  if (!its.length) throw new Error("empty");
+  const d = new Date();
+  const s = { ...newSession(its), name: `Import Cardmarket · ${d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` };
+  sessions.unshift(s);
+  return s;
+}
+$("history").addEventListener("change", async (e) => {
+  if (e.target.id !== "importCsv") return;
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  if (!DATA) { toast("La base de cartes charge encore, réessaie dans un instant."); return; }
+  try {
+    toast("Import en cours…");
+    const s = importListings(await f.text());
+    switchSession(s); setListMode("session");
+    const n = s.items.reduce((a, x) => a + x.qty, 0);
+    toast(`${s.items.length.toLocaleString("fr-FR")} annonces importées (${n.toLocaleString("fr-FR")} cartes)`);
+  } catch (err) {
+    console.warn(err);
+    toast(err.message === "format" ? "Ce fichier n'est pas un export de stock Cardmarket (colonnes cardmarketId et quantity absentes)."
+      : err.message === "empty" ? "Aucune carte trouvée dans ce fichier." : "Import impossible : " + err.message);
+  }
 });
 
 /* ----- top of the session (or of the collection) ----- */
@@ -1310,29 +1403,42 @@ const iso = (t) => new Date(Number.isFinite(t) ? t : Date.now()).toISOString();
 const toRow = (s) => ({ id: s.id, name: s.name, items: s.items, created_at: iso(s.createdAt || s.updatedAt), updated_at: iso(s.updatedAt || s.createdAt), deleted: false });
 const isAuthError = (e) => /jwt|token|401|PGRST30/i.test(`${e?.code} ${e?.message} ${e?.status}`);
 async function sync() {
-  if (!sb || !user || !navigator.onLine) return;
+  if (!sb || !user || !navigator.onLine || !dataReady) return;
   if (syncing) { syncAgain = true; return; }
   syncing = true; setCloud("busy");
   let skipped = [];
   try {
-    let { data: remote, error } = await sb.from("scan_sessions").select("id,name,items,created_at,updated_at,deleted");
+    // Light first pass: only names and dates. The cards of a session are downloaded only when it changed elsewhere.
+    const HEAD = "id,name,created_at,updated_at,deleted";
+    let { data: remote, error } = await sb.from("scan_sessions").select(HEAD);
     if (error && isAuthError(error)) {
       // access expired while the app was closed: renew it once, then retry
       const { error: re } = await sb.auth.refreshSession();
       if (re) throw re;
-      ({ data: remote, error } = await sb.from("scan_sessions").select("id,name,items,created_at,updated_at,deleted"));
+      ({ data: remote, error } = await sb.from("scan_sessions").select(HEAD));
     }
     if (error) throw error;
     const dead = store.get("cs-deleted", []);
     const byId = new Map(remote.map((r) => [r.id, r]));
+    const needItems = remote.filter((r) => {
+      if (r.deleted || dead.some((d) => d.id === r.id && d.at >= Date.parse(r.updated_at))) return false;
+      const l = sessions.find((s) => s.id === r.id);
+      return !l || Date.parse(r.updated_at) > (l.updatedAt || 0);
+    }).map((r) => r.id);
+    const remoteItems = new Map();
+    for (let i = 0; i < needItems.length; i += 10) {
+      const { data, error: ei } = await sb.from("scan_sessions").select("id,items").in("id", needItems.slice(i, i + 10));
+      if (ei) throw ei;
+      for (const r of data) remoteItems.set(r.id, r.items || []);
+    }
     let changedLocal = false;
     // 1. bring remote changes in
     for (const r of remote) {
       const rt = Date.parse(r.updated_at), l = sessions.find((s) => s.id === r.id);
       if (r.deleted) { if (l && (l.updatedAt || 0) <= rt) { sessions = sessions.filter((s) => s !== l); changedLocal = true; } continue; }
-      if (dead.some((d) => d.id === r.id && d.at >= rt)) continue;
-      if (!l) { sessions.push({ id: r.id, name: r.name, items: r.items || [], createdAt: Date.parse(r.created_at), updatedAt: rt }); changedLocal = true; }
-      else if (rt > (l.updatedAt || 0)) { l.name = r.name; l.items = r.items || []; l.updatedAt = rt; changedLocal = true; }
+      if (!remoteItems.has(r.id)) continue;
+      if (!l) { sessions.push({ id: r.id, name: r.name, items: remoteItems.get(r.id), createdAt: Date.parse(r.created_at), updatedAt: rt }); changedLocal = true; }
+      else { l.name = r.name; l.items = remoteItems.get(r.id); l.updatedAt = rt; changedLocal = true; }
     }
     // 2. send local changes and deletions out
     // (a brand-new empty session stays local until it holds a card, so devices don't pile up empty lists)
@@ -1460,7 +1566,7 @@ if (sb) {
 }
 
 /* ================= boot ================= */
-bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount(); renderStockInfo(); loadData();
+bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount(); renderStockInfo(); loadData(); loadSessions();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
