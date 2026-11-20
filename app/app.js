@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "27";
+const APP_VERSION = "28";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -447,6 +447,21 @@ async function loop() {
 const LOWER = { y: 0.56, h: 0.46, x: -0.04, w: 1.08 };
 let sawEmpty = true; // a frame without any readable code since the last card was added
 
+/* ----- Pendulum cards: set code at the bottom left, under the text box ----- */
+let pendTick = 0;
+async function readBottomLeft(r) {
+  try {
+    const x0 = Math.max(0, r.x - r.w * 0.03), y0 = Math.max(0, r.y + r.h * 0.76);
+    const w = Math.min(video.videoWidth - x0, r.w * 0.62), h = Math.min(video.videoHeight - y0, r.h * 0.3);
+    if (w < 20 || h < 20) return { matches: [], lines: [] };
+    const strip = grab(video, x0, y0, w, h, 1280);
+    // short lines first (the code), long ones (effect text) last
+    const prefer = (b) => (b.w / strip.width > 0.6 ? 1 : 0) + Math.abs((b.y + b.h / 2) / strip.height - 0.55);
+    const res = await readCodes(strip, { prefer, maxLines: 4 });
+    return { matches: res.matches, lines: [] };
+  } catch (e) { console.warn(e); return { matches: [], lines: [] }; }
+}
+
 /* ----- scanning help: why a card is not read ----- */
 let failStreak = 0;
 const statCanvas = document.createElement("canvas");
@@ -489,7 +504,7 @@ function diagnose(zone, res, textH) {
   window.__diag = { ratio, hs, textH, ...st }; // for troubleshooting from the console
   // measured on a card that fills the frame: ratio ≈ 0.6 with several lines found
   if (ratio < 0.42) return "far";
-  if (ratio > 1.1 || (all.length <= 2 && ratio > 0.85)) return "close";
+  if (ratio > 1.3) return "close";
   if (st.sharp < 18) return "blur";
   if (res.matches.some((x) => x.unsure)) return "unsure";
   return "nocode";
@@ -527,11 +542,23 @@ async function scanFrame() {
   const zw = Math.min(video.videoWidth - zx, r.w * LOWER.w), zh = Math.min(video.videoHeight - zy, r.h * LOWER.h);
   const zone = grab(video, zx, zy, zw, zh, 960);
   const k = zone.height / zh, textH = r.h * 0.017 * k;
-  // try first the line under the artwork on the right, then the rest
-  const prefer = (b) => Math.abs((b.y + b.h / 2) / zone.height - 0.3) + (b.x + b.w > zone.width * 0.7 ? 0 : 0.3);
+  // Read first the lines that look like a set code: a short line either under the artwork on the right
+  // (most cards) or at the bottom left, under the text box (Pendulum cards). Long lines are effect text.
+  const prefer = (b) => {
+    const cy = (b.y + b.h / 2) / zone.height, cx = (b.x + b.w / 2) / zone.width, wide = b.w / zone.width > 0.5 ? 0.6 : 0;
+    const normal = Math.abs(cy - 0.3) + (b.x + b.w > zone.width * 0.7 ? 0 : 0.4);
+    const pendulum = Math.max(0, 0.6 - cy) + (cx < 0.45 ? 0 : 0.5);
+    return Math.min(normal, pendulum) + wide;
+  };
   const token = loopToken;
-  const res = await readCodes(zone, { textH, prefer, maxLines: 5 });
+  const res = await readCodes(zone, { textH, prefer, maxLines: 7 });
   if (!scanning || token !== loopToken) return;
+  // Pendulum cards print the code small, bottom left: every other failed frame, read that corner at full resolution.
+  if (!res.matches.some((x) => !x.unsure) && (pendTick++ % 2 === 0)) {
+    const extra = await readBottomLeft(r);
+    if (!scanning || token !== loopToken) return;
+    res.matches.push(...extra.matches); res.lines.push(...extra.lines);
+  }
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
