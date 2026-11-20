@@ -1,5 +1,5 @@
-﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "31";
+/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "32";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -91,7 +91,20 @@ navigator.storage?.persist?.().catch(() => {});
 
 /* ================= card data ================= */
 let DATA = null, PREFIXES = null;
+/* Riftbound: second card game, its own database (data/riftbound.json). Items carry game: "rb". */
+let RB = null;
+const GAME_NAME = { ygo: "Yu-Gi-Oh", rb: "Riftbound" };
+let game = settings.game === "rb" ? "rb" : "ygo";
+const gameOf = (it) => (it?.game === "rb" ? "rb" : "ygo");
+const dataFor = (g) => (g === "rb" ? RB : DATA);
+async function loadRiftbound() {
+  try {
+    RB = await (await fetch("data/riftbound.json")).json();
+    renderList(); renderLast();
+  } catch (e) { console.warn("Riftbound data unavailable", e); }
+}
 async function loadData() {
+  loadRiftbound();
   try {
     const r = await fetch("data/cards.json");
     DATA = await r.json();
@@ -105,31 +118,34 @@ async function loadData() {
 function cmPrice(cm) {
   if (!DATA || !cm) return null;
   const ids = Array.isArray(cm) ? cm : [cm];
-  const t = ids.map((i) => DATA.prices[i]?.[0]).filter((x) => x != null);
+  const t = ids.map((i) => DATA.prices[i]?.[0] ?? RB?.prices[i]?.[0]).filter((x) => x != null);
   if (!t.length) return null;
   return { lo: Math.min(...t), hi: Math.max(...t) };
 }
 const priceText = (p) => !p ? "" : p.lo === p.hi ? eur(p.lo) : `${eur(p.lo)} – ${eur(p.hi)}`;
-function candidatesFor(key) {
-  const seen = new Set(), out = [];
-  for (const e of DATA.prints[key] || []) {
+function candidatesFor(key, g = "ygo") {
+  const D = dataFor(g), seen = new Set(), out = [];
+  for (const e of D?.prints[key] || []) {
     const id = e[0] + "|" + e[2];
     if (seen.has(id)) continue; seen.add(id);
-    out.push({ card: e[0], set: DATA.sets[e[1]], rarity: e[2], cm: e[3] || 0 });
+    out.push({ card: e[0], set: D.sets[e[1]], rarity: e[2], cm: e[3] || 0 });
   }
   return out;
 }
 function applyCandidate(it, c) {
-  it.card = c.card; it.nameEN = DATA.cards[c.card][0]; it.nameFR = DATA.cards[c.card][1] || it.nameEN;
+  const D = dataFor(gameOf(it));
+  it.card = c.card; it.nameEN = D.cards[c.card][0]; it.nameFR = D.cards[c.card][1] || it.nameEN;
   it.set = c.set; it.rarity = c.rarity; it.cm = c.cm;
 }
 /** Build an item from a matched code {key, code, region}. */
 function makeItem(m, extra = {}) {
-  const cands = candidatesFor(m.key);
+  const g = m.game === "rb" ? "rb" : "ygo";
+  const cands = candidatesFor(m.key, g);
   const it = {
     id: uid(), createdAt: Date.now(), key: m.key, code: m.code, prefix: m.key.split("-")[0], cn: m.key.split("-")[1],
-    lang: REGION[m.region] || settings.lang, firstEd: false, condition: settings.cond, comment: settings.comment,
-    qty: 1, price: "", cands, ...extra,
+    // Riftbound cards are printed in English unless the code line says otherwise
+    lang: REGION[m.region] || (g === "rb" ? "English" : settings.lang), firstEd: false, condition: settings.cond, comment: settings.comment,
+    qty: 1, price: "", cands, ...(g === "rb" ? { game: "rb" } : {}), ...extra,
   };
   applyCandidate(it, cands[0]);
   if (cands.length > 1) { it.rarity = ""; it.cm = [...new Set(cands.flatMap((c) => Array.isArray(c.cm) ? c.cm : c.cm ? [c.cm] : []))]; }
@@ -202,7 +218,49 @@ function matchAll(text) {
   }
   return out;
 }
+/* ----- Riftbound: "VEN · 136a/166 · EN" printed at the bottom left ----- */
+const RB_L2D = { O: "0", Q: "0", D: "0", U: "0", I: "1", L: "1", J: "1", T: "7", Z: "2", S: "5", B: "8", G: "6" };
+const RB_D2L = { 0: "O", 1: "I", 5: "S", 8: "B", 2: "Z", 6: "G", 7: "T" };
+/** Set codes the read could be (an exact read first, then one character mistaken for a look-alike). */
+function rbSets(raw) {
+  const sets = Object.keys(RB.totals);
+  if (sets.includes(raw)) return [raw];
+  const near = (a, b) => [...a].every((ch, i) => ch === b[i] || RB_L2D[ch] === b[i] || RB_D2L[ch] === b[i] || (RB_L2D[b[i]] && RB_L2D[b[i]] === ch));
+  return sets.filter((x) => x.length === raw.length && near(raw, x) && [...raw].filter((ch, i) => ch !== x[i]).length <= 1);
+}
+function matchRiftbound(text) {
+  if (!RB) return [];
+  const out = [];
+  const s = String(text).toUpperCase().replace(/[·•:;,.|]/g, " ").replace(/\s+/g, " ");
+  // SET  NUM/TOTAL  [LANG]   — and SET R01 / T03 (runes, tokens), which have no total
+  const re = /([A-Z0-9]{3}) ?-? ?([A-Z]{0,2}[0-9OILSBZG]{1,3}[A-Z*]?) ?\/ ?([0-9OILSBZG]{3})(?: ([A-Z]{2})\b)?|([A-Z0-9]{3}) ?-? ?([RT][0-9OI]{2})\b/g;
+  for (const mm of s.matchAll(re)) {
+    const rawSet = mm[1] || mm[5], rawNum = mm[2] || mm[6], rawTot = mm[3] || "", lang = mm[4] || "";
+    const pre = rawNum.match(/^(SP|[RT])?/)[0], rest = rawNum.slice(pre.length);
+    const suf = /[A-Z*]$/.test(rest) && !RB_L2D[rest.slice(-1)] ? rest.slice(-1) : rest.endsWith("*") ? "*" : "";
+    const digits = rest.slice(0, rest.length - suf.length);
+    const fixed = [...digits].map((ch) => RB_L2D[ch] || ch).join("");
+    if (!/^\d+$/.test(fixed)) continue;
+    const tot = [...rawTot].map((ch) => RB_L2D[ch] || ch).join("");
+    const found = [];
+    for (const setc of rbSets(rawSet)) {
+      // the number after the slash must be the set's (special cards: their own small total)
+      if (tot && pre !== "SP" && Number(tot) !== RB.totals[setc]) continue;
+      const num = pre + (pre ? fixed : fixed.padStart(3, "0")) + suf;
+      const key = `${setc}-${num}`;
+      if (RB.prints[key]) found.push({ key, setc, num });
+    }
+    const clean = fixed === digits && tot === rawTot;
+    for (const f of found) if (!out.some((o) => o.key === f.key)) {
+      const region = REGION[lang] ? lang : REGION_FIX[lang] || "";
+      out.push({ key: f.key, code: `${f.setc}-${f.num.toLowerCase().replace(/^(sp|r|t)/, (x) => x.toUpperCase())}`, region, game: "rb",
+        unsure: found.length > 1, exact: found.length === 1 && clean && f.setc === rawSet && !!(tot || pre) });
+    }
+  }
+  return out;
+}
 function matchManual(raw) {
+  if (game === "rb") return matchRiftbound(String(raw).toUpperCase().replace(/^([A-Z]{3})-/, "$1 ").replace(/\s+/g, " ").replace(/^([A-Z]{3} [A-Z]{0,2}\d+[A-Z*]?)$/, (x) => { const [setc] = x.split(" "); return `${x}/${RB?.totals[setc] || ""}`; }))[0] || null;
   const s = String(raw).toUpperCase().replace(/\s+/g, "");
   const m = s.match(/^([A-Z0-9]{2,5})-([A-Z]{0,2})(\d{1,3})$/);
   if (m) {
@@ -294,7 +352,7 @@ async function recognize(c, b) {
   return s;
 }
 /** All set codes found in canvas `c` (detection + recognition of every likely line). */
-async function readCodes(c, { textH = 0, maxLines = 8, prefer = null } = {}) {
+async function readCodes(c, { textH = 0, maxLines = 8, prefer = null, match = matchAll } = {}) {
   const raw = (await detectText(c)).filter((b) => b.w > b.h * 2);
   // detected boxes are padded ("unclip"): about 2.5× the height of the letters
   let boxes = textH ? raw.filter((b) => b.h > textH * 0.6 && b.h < textH * 4.5) : raw;
@@ -302,7 +360,7 @@ async function readCodes(c, { textH = 0, maxLines = 8, prefer = null } = {}) {
   const lines = [];
   for (const b of boxes.slice(0, maxLines)) {
     const text = await recognize(c, b);
-    const matches = matchAll(text.toUpperCase());
+    const matches = match(text.toUpperCase());
     lines.push({ box: b, text, matches });
     if (matches.some((m) => !m.unsure) && prefer) break;
   }
@@ -508,6 +566,7 @@ function diagnose(zone, res, textH) {
   if (!all.length) return st.std < 16 ? "empty" : st.sharp < 18 ? "blur" : "empty";
   // detected text lines are about 2.5× the letter height: compare every line found (even the ones too big
   // or too small to be read) with the size expected for a card that fills the frame
+  if (!textH) return st.sharp < 18 ? "blur" : res.matches.some((x) => x.unsure) ? "unsure" : "nocode";
   const hs = all.map((b) => b.h).sort((a, b) => a - b), med = hs[hs.length >> 1], ratio = med / (2.5 * textH);
   window.__diag = { ratio, hs, textH, ...st }; // for troubleshooting from the console
   // measured on a card that fills the frame: ratio ≈ 0.6 with several lines found
@@ -523,7 +582,7 @@ function showHint(kind) {
   hintShown = kind;
   const box = $("scanHint");
   if (!kind) { box.hidden = true; return; }
-  const [title, text] = HINTS[kind];
+  const [title, text] = kind === "nocode" && game === "rb" ? ["Code illisible", "Vérifie que le code en bas à gauche de la carte (ex. VEN · 136a/166) est bien visible : pas de doigt ni de reflet dessus."] : HINTS[kind];
   box.innerHTML = `<span class="hint-ico">${ico(kind === "dark" ? "flash" : kind === "far" || kind === "close" ? "scan" : "card")}</span><div><strong>${esc(title)}</strong><span>${esc(text)}</span></div>`;
   box.hidden = false;
 }
@@ -546,6 +605,7 @@ async function scanFrame() {
       return;
     }
   }
+  if (game === "rb") return scanRiftbound(r, sig);
   const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
   const zw = Math.min(video.videoWidth - zx, r.w * LOWER.w), zh = Math.min(video.videoHeight - zy, r.h * LOWER.h);
   const zone = grab(video, zx, zy, zw, zh, 960);
@@ -595,6 +655,40 @@ async function scanFrame() {
     celebrate(it);
     setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span>${ed.ed ? " · 1re édition" : ""} — présente la suivante`);
   } else setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`);
+}
+/* ----- Riftbound: the code is at the bottom left ("VEN · 136a/166 · EN"); a Battlefield card held
+   sideways in the frame has it higher, around three quarters of the frame: read the lower-left area. ----- */
+async function scanRiftbound(r, sig) {
+  if (!RB) { setStatus("La base Riftbound charge encore…"); await sleep(400); return; }
+  const zx = Math.max(0, r.x - r.w * 0.04), zy = Math.max(0, r.y + r.h * 0.56);
+  const zw = Math.min(video.videoWidth - zx, r.w * 0.66), zh = Math.min(video.videoHeight - zy, r.h * 0.5);
+  const zone = grab(video, zx, zy, zw, zh, 1280); // full resolution: the code is small
+  // short lines on the left first; long lines are effect text
+  const prefer = (b) => (b.w / zone.width > 0.8 ? 1 : 0) + (b.x / zone.width > 0.35 ? 0.6 : 0) - ((b.y + b.h) / zone.height) * 0.2;
+  const token = loopToken;
+  const res = await readCodes(zone, { prefer, maxLines: 5, match: matchRiftbound });
+  if (!scanning || token !== loopToken) return;
+  if (settings.debug) showDebug(zone, res, r);
+  const m = res.matches.find((x) => !x.unsure) || null;
+  reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
+  if (!m) {
+    if (!res.boxes.length || res.lines.every((l) => !l.text)) sawEmpty = true;
+    setStatus("Recherche du code…");
+    if (++failStreak >= 3) showHint(diagnose(zone, res, 0));
+    return;
+  }
+  failStreak = 0; showHint(null);
+  if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); changed = false; last.sig = sig; return; }
+  const hits = reads.filter((k) => k === m.key).length;
+  if (!(m.exact || hits >= 2)) { setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`); return; }
+  const it = makeItem(m);
+  const shot = camMode === "photo" ? capturePhoto(r) : null;
+  commit(it, "scan");
+  if (shot) attachPhoto(shot, it, lastAdded?.id);
+  last = { sig, key: m.key, itemId: lastAdded?.id, edPending: 0 };
+  changed = false; changedHits = 0; reads = []; sawEmpty = false;
+  celebrate(it);
+  setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span> — présente la suivante`);
 }
 /* ----- "1st Edition" mention: printed bottom-left, next to the 8-digit passcode ----- */
 // 1st Edition · 1re/1ère Édition · 1. Auflage · 1a Edizione · 1a Edición · 1ª Edição — never "Limited Edition".
@@ -729,7 +823,7 @@ function rotate(bmp, deg) {
 }
 
 /* ================= list operations ================= */
-const mergeKey = (it) => [it.key, it.rarity, it.lang, it.firstEd, it.condition, it.comment].join("|");
+const mergeKey = (it) => [gameOf(it), it.key, it.rarity, it.lang, it.firstEd, it.condition, it.comment].join("|");
 let lastAdded = null; // {id, merged}
 function commit(it, source) {
   const twin = items.find((x) => mergeKey(x) === mergeKey(it));
@@ -751,7 +845,7 @@ function setRarity(it, rarity) {
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
 /** eBay France search on the printed set code (MP20-FR167): finds that exact print and language. */
-const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(it.code || it.nameEN || "")}`;
+const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : it.code || it.nameEN || "")}`;
 /** Cardmarket and eBay logo buttons. */
 const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
   + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`
@@ -762,10 +856,10 @@ const vintedLink = (it) => `https://www.vinted.fr/catalog?search_text=${encodeUR
 const CM_LANG = { English: 1, French: 2, German: 3, Spanish: 4, Italian: 5, Portuguese: 8 };
 /** Product page with offers filtered on the card's language; a name search when the exact product is unknown. */
 const cmLink = (it) => {
-  const lang = CM_LANG[it.lang] || 2;
+  const lang = CM_LANG[it.lang] || 2, g = gameOf(it) === "rb" ? "Riftbound" : "YuGiOh";
   return typeof it.cm === "number" && it.cm
-    ? `https://www.cardmarket.com/fr/YuGiOh/Products?idProduct=${it.cm}&language=${lang}`
-    : `https://www.cardmarket.com/fr/YuGiOh/Products/Search?searchString=${encodeURIComponent(it.nameEN || "")}&language=${lang}`;
+    ? `https://www.cardmarket.com/fr/${g}/Products?idProduct=${it.cm}&language=${lang}`
+    : `https://www.cardmarket.com/fr/${g}/Products/Search?searchString=${encodeURIComponent(it.nameEN || "")}&language=${lang}`;
 };
 
 /* ================= rendering ================= */
@@ -778,6 +872,8 @@ const RAR = {
   "Premium Gold Rare": ["PGR", "r-gold"], "Gold Secret Rare": ["GScR", "r-gold"], "Platinum Rare": ["PlR", "r-r"],
   "Starfoil Rare": ["SFR", "r-sr"], "Mosaic Rare": ["MSR", "r-sr"], "Shatterfoil Rare": ["SHR", "r-sr"], "Ultra Parallel Rare": ["UPR", "r-ur"],
   "Short Print": ["SP", "r-c"], "Super Short Print": ["SSP", "r-c"],
+  // Riftbound
+  "Uncommon": ["U", "r-c"], "Epic": ["E", "r-ur"], "Showcase": ["SH", "r-gold"],
 };
 function rarBadge(r) {
   if (!r) return `<span class="rar r-q" title="Rareté à choisir">?</span>`;
@@ -829,8 +925,16 @@ function cardImgId(it) {
 }
 /** First photo taken of this card line, if it is on this phone. */
 const itemPhoto = (it) => { if (!it.photos?.length || !photoCache) return null; for (const id of it.photos) { const p = photoCache.find((x) => x.id === id); if (p) return p; } return null; };
+/** Riftbound picture of the item's card (resized by the image server). */
+function rbImg(it) {
+  if (!RB) return "";
+  let c = RB.cards[it.card];
+  if (!c || c[0] !== it.nameEN) { const e = (RB.prints[it.key] || []).find((x) => RB.cards[x[0]][0] === it.nameEN) || (RB.prints[it.key] || [])[0]; c = e && RB.cards[e[0]]; }
+  return c && c[2] ? `${RB.img}${c[2]}?w=160&fm=webp&accountingTag=RB` : "";
+}
 const thumb = (it, big = false) => {
   const ph = itemPhoto(it);
+  if (!ph && gameOf(it) === "rb") { const u = rbImg(it); return `<span class="thumb ${big ? "lg" : ""}">${u ? `<img src="${esc(u)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}${rarBadge(it.rarity)}</span>`; }
   if (ph) return `<span class="thumb ${big ? "lg" : ""} has-photo"><img src="${blobUrl(ph)}" alt="">${rarBadge(it.rarity)}<span class="cam-badge">${ico("camera")}${it.photos.length > 1 ? it.photos.length : ""}</span></span>`;
   const id = cardImgId(it);
   return `<span class="thumb ${big ? "lg" : ""}">${id ? `<img src="img/${id}.webp" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ""}${rarBadge(it.rarity)}</span>`;
@@ -857,7 +961,7 @@ function renderLast() {
     ${it.cands.length > 1 ? `${it.rarity ? "" : `<span class="ask">Quelle rareté ?</span>`}
       <div class="chips">${it.cands.map((c) => `<button class="chip ${c.rarity === it.rarity ? "on" : ""}" data-rar="${esc(c.rarity)}">${esc(c.rarity)}</button>`).join("")}</div>` : ""}
     <div class="actions">
-      <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
+      ${gameOf(it) === "rb" ? "" : `<button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>`}
       <button class="chip" data-act="plus">${ico("plus")} 1</button>
       <button class="chip" data-act="undo">${ico("undo")} Annuler</button>
       ${marketLinks(it)}
@@ -935,7 +1039,7 @@ $("stockClear").addEventListener("click", () => { STOCK = null; try { localStora
 const stockTag = (it) => { const s = stockOf(it); return s ? `<span class="tag stock" title="Déjà dans ton stock Cardmarket">stock ${s.n}</span>` : ""; };
 
 /* ----- "Ma collection": every session merged, one line per card version and language ----- */
-const colKey = (it) => [typeof it.cm === "number" && it.cm ? it.cm : it.key, it.rarity, it.lang, it.firstEd].join("|");
+const colKey = (it) => [gameOf(it), typeof it.cm === "number" && it.cm ? it.cm : it.key, it.rarity, it.lang, it.firstEd].join("|");
 function collection() {
   const map = new Map();
   for (const s of sessions) for (const it of s.items) {
@@ -957,6 +1061,7 @@ function visibleItems(list) {
     if (filter === "gem") return !!gemPrice(it);
     if (filter === "instock") return !!stockOf(it);
     if (filter === "photo") return !!it.photos?.length;
+    if (filter.startsWith("game:")) return gameOf(it) === filter.slice(5);
     if (filter === "notstock") return !stockOf(it);
     if (filter.startsWith("rar:")) return it.rarity && rarClass(it.rarity) === filter.slice(4);
     if (filter.startsWith("lang:")) return it.lang === filter.slice(5);
@@ -1386,7 +1491,7 @@ function buildCsv(list = listSource()) {
     if (!it.rarity) continue;
     const id = typeof it.cm === "number" ? it.cm : "";
     let price = it.price;
-    if (!price && settings.priceTrend && id) price = DATA?.prices[id]?.[0] ?? "";
+    if (!price && settings.priceTrend && id) price = DATA?.prices[id]?.[0] ?? RB?.prices[id]?.[0] ?? "";
     const k = [id || it.key, it.rarity, it.lang, it.firstEd, it.condition, price, it.comment].join("|");
     const r = rows.get(k);
     if (r) r.qty += it.qty; else rows.set(k, { it, id, price, qty: it.qty });
@@ -1471,6 +1576,18 @@ $("startBtn").addEventListener("click", () => {
 });
 
 /* ================= photo mode: pictures of cards for listings ================= */
+function renderGame() {
+  $("gameMode").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b.dataset.game === game));
+  $("manualCode").placeholder = game === "rb" ? "Code Riftbound : VEN-136a" : "MP20-FR167 ou « Galant Granite »";
+}
+$("gameMode").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-game]"); if (!b || b.dataset.game === game) return;
+  game = b.dataset.game; settings.game = game; store.set("cs-settings", settings);
+  reads = []; last = null; changed = true; failStreak = 0; showHint(null);
+  renderGame();
+  toast(`Jeu : ${GAME_NAME[game]}`);
+  if (!scanning) setStatus(`${GAME_NAME[game]} — appuie sur le bouton pour lancer la caméra`);
+});
 let camMode = settings.camMode === "photo" ? "photo" : "scan";
 function renderCamMode() {
   $("camMode").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b.dataset.cam === camMode));
@@ -1617,7 +1734,7 @@ $("viewer").addEventListener("touchend", (e) => {
   if (swipeX == null) return; const dx = e.changedTouches[0].clientX - swipeX; swipeX = null;
   if (Math.abs(dx) > 60) openViewer(dx < 0 ? (viewerIdx + 1) % photoCache.length : (viewerIdx - 1 + photoCache.length) % photoCache.length);
 });
-renderCamMode(); loadPhotos();
+renderCamMode(); renderGame(); loadPhotos();
 $("photoInput").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) scanPhoto(f); });
 /* ----- manual add: by set code, or by name with suggestions ----- */
 const REGION_OF = { French: "FR", English: "EN", German: "DE", Italian: "IT", Spanish: "SP", Portuguese: "PT" };
@@ -1645,7 +1762,7 @@ function searchNames(q) {
 }
 function showSuggest(html) { $("suggest").innerHTML = html; $("suggest").hidden = !html; }
 function suggestCards(q) {
-  if (!DATA || looksLikeCode(q)) return showSuggest("");
+  if (!DATA || game === "rb" || looksLikeCode(q)) return showSuggest("");
   const hits = searchNames(q);
   showSuggest(hits.length ? hits.map((i) => {
     const [en, fr, id] = DATA.cards[i];
@@ -1681,6 +1798,7 @@ $("manualForm").addEventListener("submit", (e) => {
   const v = $("manualCode").value;
   const m = matchManual(v);
   if (m) { $("manualCode").value = ""; showSuggest(""); commit(makeItem(m), "manual"); return; }
+  if (game === "rb") { toast("Code Riftbound non reconnu. Exemple : VEN-136a ou SFD 087/221"); return; }
   const hits = looksLikeCode(v) ? [] : searchNames(v);
   if (hits.length === 1) return suggestPrints(hits[0]);
   if (hits.length) return suggestCards(v);
@@ -1902,6 +2020,6 @@ bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
-  matchAll, matchManual, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
+  matchAll, matchManual, matchRiftbound, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
   async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getEngine(); scanning = wantScan = true; reads = []; changed = true; loop(); },
 };

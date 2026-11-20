@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=31">
+<link rel="stylesheet" href="style.css?v=32">
 </head>
 <body>
 
@@ -137,6 +137,10 @@
       </button>
     </div>
 
+    <div class="segmented cam-mode game-mode" id="gameMode" role="tablist" aria-label="Jeu de cartes">
+      <button class="seg on" data-game="ygo" type="button">Yu-Gi-Oh</button>
+      <button class="seg" data-game="rb" type="button">Riftbound</button>
+    </div>
     <div class="segmented cam-mode" id="camMode" role="tablist" aria-label="Mode de la caméra">
       <button class="seg on" data-cam="scan" type="button"><svg class="ico sm"><use href="#i-scan"/></svg> Scan continu</button>
       <button class="seg" data-cam="photo" type="button"><svg class="ico sm"><use href="#i-camera"/></svg> Photo</button>
@@ -232,6 +236,8 @@
           <option value="todo">À vérifier</option>
           <option value="gem">Pépites</option>
           <option value="photo">Avec photo</option>
+          <option value="game:ygo">Yu-Gi-Oh uniquement</option>
+          <option value="game:rb">Riftbound uniquement</option>
           <option value="instock">Déjà dans mon stock Cardmarket</option>
           <option value="notstock">Pas dans mon stock Cardmarket</option>
           <optgroup label="Rareté">
@@ -414,6 +420,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=31"></script>
+<script type="module" src="app.js?v=32"></script>
 </body>
 </html>
