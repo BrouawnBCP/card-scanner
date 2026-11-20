@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "36";
+const APP_VERSION = "38";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1578,7 +1578,7 @@ $("startBtn").addEventListener("click", () => {
 /* ================= photo mode: pictures of cards for listings ================= */
 function renderGame() {
   $("gameMode").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b.dataset.game === game));
-  $("manualCode").placeholder = game === "rb" ? "Code Riftbound : VEN-136a" : "MP20-FR167 ou « Galant Granite »";
+  $("manualCode").placeholder = game === "rb" ? "Code, ex. VEN-136a" : "Code ou nom de carte";
 }
 $("gameMode").addEventListener("click", (e) => {
   const b = e.target.closest("[data-game]"); if (!b || b.dataset.game === game) return;

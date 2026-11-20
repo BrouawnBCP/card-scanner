@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=36">
-<link rel="stylesheet" href="theme-galaxy.css?v=36">
+<link rel="stylesheet" href="style.css?v=38">
+<link rel="stylesheet" href="theme-galaxy.css?v=38">
 </head>
 <body>
 
@@ -185,7 +185,7 @@
     <details class="manual-wrap" id="manualWrap">
       <summary><svg class="ico sm"><use href="#i-keyboard"/></svg> Ajouter à la main (code ou nom)</summary>
       <form class="manual" id="manualForm" autocomplete="off">
-        <input id="manualCode" placeholder="MP20-FR167 ou « Galant Granite »" aria-label="Code de set ou nom de la carte" autocapitalize="off" spellcheck="false">
+        <input id="manualCode" placeholder="Code ou nom de carte" aria-label="Code de set ou nom de la carte" autocapitalize="off" spellcheck="false">
         <button class="btn primary" type="submit">Ajouter</button>
       </form>
       <div class="suggest" id="suggest" hidden></div>
@@ -224,7 +224,7 @@
       <div class="stat warn" id="statTodoBox"><span class="stat-v" id="statTodo">0</span><span class="stat-l">à vérifier</span></div>
     </div>
     <div class="list-tools">
-      <input id="listSearch" type="search" placeholder="Rechercher un nom, un code…" aria-label="Rechercher dans la liste" autocapitalize="off" spellcheck="false">
+      <input id="listSearch" type="search" placeholder="Nom ou code" aria-label="Rechercher dans la liste" autocapitalize="off" spellcheck="false">
       <button class="btn primary" id="exportBtn"><svg class="ico sm"><use href="#i-share"/></svg> Exporter</button>
     </div>
     <div class="list-filters">
@@ -243,16 +243,20 @@
           <option value="todo">À vérifier</option>
           <option value="gem">Pépites</option>
           <option value="photo">Avec photo</option>
-          <option value="game:ygo">Yu-Gi-Oh uniquement</option>
-          <option value="game:rb">Riftbound uniquement</option>
-          <option value="instock">Déjà dans mon stock Cardmarket</option>
-          <option value="notstock">Pas dans mon stock Cardmarket</option>
+          <optgroup label="Jeu">
+            <option value="game:ygo">Yu-Gi-Oh</option>
+            <option value="game:rb">Riftbound</option>
+          </optgroup>
+          <optgroup label="Stock Cardmarket">
+            <option value="instock">Déjà en stock</option>
+            <option value="notstock">Pas en stock</option>
+          </optgroup>
           <optgroup label="Rareté">
             <option value="rar:r-c">Communes</option>
             <option value="rar:r-r">Rares</option>
             <option value="rar:r-sr">Super Rares</option>
-            <option value="rar:r-ur">Ultra / Ultimate Rares</option>
-            <option value="rar:r-scr">Secret Rares et plus</option>
+            <option value="rar:r-ur">Ultra / Ultimate</option>
+            <option value="rar:r-scr">Secret et plus</option>
             <option value="rar:r-gold">Gold Rares</option>
           </optgroup>
           <optgroup label="Langue">
@@ -431,6 +435,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=36"></script>
+<script type="module" src="app.js?v=38"></script>
 </body>
 </html>
