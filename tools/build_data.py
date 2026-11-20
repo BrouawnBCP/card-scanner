@@ -7,7 +7,7 @@ Sources (downloaded fresh unless --cache is given):
 Output: one compact JSON file (default app/data/cards.json):
   {
     "v": build date,
-    "cards": [[nameEN, nameFR], ...],
+    "cards": [[nameEN, nameFR, ygoprodeckId], ...],
     "sets":  [setName, ...],
     "prints": {"MP20-167": [[cardIdx, setIdx, rarity, cmId, cmVersions], ...]},
     "prices": {"cmId": [trend, low, avg7], ...}
@@ -67,7 +67,7 @@ def main():
     set_cards = collections.defaultdict(set)     # setName -> normalized card names
     for c in en:
         ci = len(cards)
-        cards.append([c["name"], fr.get(c["id"], "")])
+        cards.append([c["name"], fr.get(c["id"], ""), c["id"]])  # id = image file name (img/<id>.webp)
         for s in c.get("card_sets") or []:
             p, n = split_code(s["set_code"])
             if not p:

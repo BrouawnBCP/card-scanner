@@ -4,21 +4,22 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "30 4 * * *"   # chaque nuit : cotes Cardmarket et base de cartes à jour
+    - cron: "30 4 * * *"   # chaque nuit : cotes Cardmarket, nouvelles cartes et leurs vignettes
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # pour enregistrer les vignettes sur la branche card-images
   pages: write
   id-token: write
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,6 +27,32 @@ jobs:
           python-version: "3.12"
       - name: Construire la base de cartes
         run: python tools/build_data.py --out app/data/cards.json
+
+      # Les vignettes sont stockées sur une branche à part : chaque image n'est téléchargée
+      # qu'une seule fois chez YGOPRODeck, comme ils le demandent.
+      - name: Vignettes des cartes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "card-scanner-bot"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$REMOTE" card-images >/dev/null 2>&1; then
+            git clone --depth 1 --branch card-images "$REMOTE" imgrepo
+          else
+            mkdir imgrepo && git -C imgrepo init -b card-images && git -C imgrepo remote add origin "$REMOTE"
+          fi
+          pip install --quiet pillow
+          python tools/build_images.py --data app/data/cards.json --out imgrepo
+          git -C imgrepo add -A
+          if ! git -C imgrepo diff --cached --quiet; then
+            git -C imgrepo commit --quiet -m "Vignettes $(date -u +%F)"
+            git -C imgrepo push --quiet origin card-images
+          fi
+          mkdir -p app/img
+          cp imgrepo/*.webp app/img/ 2>/dev/null || true
+          echo "$(ls app/img | wc -l) vignettes publiées"
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

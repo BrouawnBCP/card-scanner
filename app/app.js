@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "11";
+const APP_VERSION = "12";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -514,6 +514,19 @@ const priceHtml = (cm) => {
   return p.lo === p.hi ? `<span class="price">${esc(eur(p.lo))}</span>` : `<span class="price range" title="Plusieurs versions possibles">${num(p.lo)}–${num(p.hi)} €</span>`;
 };
 const ico = (id) => `<svg class="ico"><use href="#i-${id}"/></svg>`;
+/** YGOPRODeck id of the item's card (its thumbnail is img/<id>.webp). */
+function cardImgId(it) {
+  if (!DATA) return 0;
+  const c = DATA.cards[it.card];
+  if (c && c[0] === it.nameEN && c[2]) return c[2];
+  const list = DATA.prints[it.key] || [];
+  const e = list.find((x) => DATA.cards[x[0]][0] === it.nameEN) || list[0];
+  return e ? DATA.cards[e[0]][2] || 0 : 0;
+}
+const thumb = (it, big = false) => {
+  const id = cardImgId(it);
+  return `<span class="thumb ${big ? "lg" : ""}">${id ? `<img src="img/${id}.webp" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ""}${rarBadge(it.rarity)}</span>`;
+};
 
 function renderLast() {
   const box = $("last");
@@ -524,7 +537,7 @@ function renderLast() {
   box.hidden = false; box.className = "last" + (it.rarity ? "" : " todo") + (fresh ? " enter" : "");
   box.innerHTML = `
     <div class="last-top">
-      ${rarBadge(it.rarity)}
+      ${thumb(it, true)}
       <div class="last-main">
         <span class="eyebrow">Dernière carte${it.qty > 1 ? ` · ×${it.qty}` : ""}</span>
         <span class="name">${esc(it.nameFR)}</span>
@@ -571,7 +584,7 @@ function renderList() {
     const isNew = Date.now() - it.createdAt < 1500, open = openId === it.id;
     return `<div class="item ${it.rarity ? "" : "todo"} ${isNew ? "enter" : ""}" data-id="${it.id}">
       <button class="row-main" data-act="toggle" aria-expanded="${open}">
-        ${rarBadge(it.rarity)}
+        ${thumb(it)}
         <span class="row-text">
           <span class="name">${esc(it.nameFR)}</span>
           <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
