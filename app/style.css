@@ -508,4 +508,15 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 #view-scan .status,#view-scan .round-btn,#view-scan .scan-hint{backdrop-filter:none;-webkit-backdrop-filter:none}
 #view-scan .status{background:rgba(6,8,20,.82)} #view-scan .round-btn{background:rgba(6,8,20,.7)} #view-scan .scan-hint{background:rgba(36,22,6,.94)}
 #view-scan .corner{filter:none}
-#view-scan .scanline{box-shadow:none}
+/* scan line: a soft light gliding up and down the lower part of the card, continuously.
+   It moves with "transform", which the phone animates on its own: it stays smooth even while the code is being read.
+   The element is as tall as the distance travelled; the line is drawn on its top edge only. */
+#view-scan .scanline{left:8%;right:8%;top:54%;height:40%;border-radius:0;box-shadow:none;opacity:0;pointer-events:none;will-change:transform,opacity;
+  background:linear-gradient(180deg,rgba(255,255,255,0) 0,rgba(255,255,255,0) 0) no-repeat;transform:translateY(0)}
+#view-scan .scanline::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;border-radius:2px;
+  background:linear-gradient(90deg,transparent,rgba(95,216,255,.85) 30%,rgba(255,140,80,.85) 70%,transparent)}
+#view-scan .scanline::after{content:"";position:absolute;left:10%;right:10%;top:-10px;height:22px;border-radius:50%;
+  background:radial-gradient(50% 50% at 50% 50%,rgba(95,216,255,.16),transparent 70%)}
+#view-scan .stage.live .scanline{opacity:.6;animation:glide 3.2s cubic-bezier(.45,0,.55,1) infinite alternate}
+@keyframes glide{from{transform:translateY(0)}to{transform:translateY(100%)}}
+@media (prefers-reduced-motion:reduce){#view-scan .stage.live .scanline{animation:none;transform:translateY(50%)}}
