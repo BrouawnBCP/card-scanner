@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=40">
-<link rel="stylesheet" href="theme-galaxy.css?v=40">
+<link rel="stylesheet" href="style.css?v=41">
+<link rel="stylesheet" href="theme-galaxy.css?v=41">
 </head>
 <body>
 
@@ -132,6 +132,7 @@
 
   <!-- ===== Scanner ===== -->
   <section id="view-scan" class="view" hidden>
+    <div class="scan-screen">
     <div class="topbar">
       <button class="session-chip" id="sessionBar" type="button" aria-label="Voir mes sessions">
         <span class="sc-dot" aria-hidden="true"></span>
@@ -178,9 +179,9 @@
         </button>
       </div>
       <div class="snap" id="snap" aria-hidden="true"></div>
+      <div class="scan-hint" id="scanHint" role="status" aria-live="polite" hidden></div>
     </div>
-
-    <div class="scan-hint" id="scanHint" role="status" aria-live="polite" hidden></div>
+    </div><!-- /scan-screen -->
 
     <div class="last" id="last" hidden></div>
 
@@ -437,6 +438,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=40"></script>
+<script type="module" src="app.js?v=41"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "40";
+const APP_VERSION = "41";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -639,7 +639,7 @@ async function scanFrame() {
   }
   failStreak = 0; showHint(null);
   // Same code as the card just added and the camera never saw the card leave: it is the same card being moved.
-  if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); changed = false; last.sig = sig; return; }
+  if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> ${esc(it.nameFR)}${addedPrice(it)}`); changed = false; last.sig = sig; return; }
   const hits = reads.filter((k) => k === m.key).length;
   if (m.exact || hits >= 2) {
     // The edition mention is the lowest line on the left, below the code line: read that strip on its own.
@@ -653,7 +653,7 @@ async function scanFrame() {
     last = { sig, key: m.key, itemId: lastAdded?.id, edPending: ed.ed ? 0 : 3, edFrom: (fromY - r.y) / r.h };
     changed = false; changedHits = 0; reads = []; sawEmpty = false;
     celebrate(it);
-    setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span>${ed.ed ? " · 1re édition" : ""} — présente la suivante`);
+    setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span> ${esc(it.nameFR)}${ed.ed ? " · 1re édition" : ""}${addedPrice(it)}`);
   } else setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`);
 }
 /* ----- Riftbound: the code is at the bottom left ("VEN · 136a/166 · EN"); a Battlefield card held
@@ -678,7 +678,7 @@ async function scanRiftbound(r, sig) {
     return;
   }
   failStreak = 0; showHint(null);
-  if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> — présente la suivante`); changed = false; last.sig = sig; return; }
+  if (last && m.key === last.key && !sawEmpty) { setStatus(`Déjà ajoutée : <span class="code">${esc(m.code)}</span> ${esc(it.nameFR)}${addedPrice(it)}`); changed = false; last.sig = sig; return; }
   const hits = reads.filter((k) => k === m.key).length;
   if (!(m.exact || hits >= 2)) { setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`); return; }
   const it = makeItem(m);
@@ -688,7 +688,7 @@ async function scanRiftbound(r, sig) {
   last = { sig, key: m.key, itemId: lastAdded?.id, edPending: 0 };
   changed = false; changedHits = 0; reads = []; sawEmpty = false;
   celebrate(it);
-  setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span> — présente la suivante`);
+  setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span> ${esc(it.nameFR)}${addedPrice(it)}`);
 }
 /* ----- "1st Edition" mention: printed bottom-left, next to the 8-digit passcode ----- */
 // 1st Edition · 1re/1ère Édition · 1. Auflage · 1a Edizione · 1a Edición · 1ª Edição — never "Limited Edition".
@@ -793,6 +793,8 @@ function beep() {
     o.connect(g).connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.13);
   } catch {}
 }
+/** " · 2,17 €" after the name of a card just added (shown on the camera, the card panel being lower on the page). */
+const addedPrice = (it) => { const p = cmPrice(it.cm); return p ? " · " + esc(p.lo === p.hi ? eur(p.lo) : `${num(p.lo)}–${num(p.hi)} €`) : ""; };
 function setStatus(html) { $("status").innerHTML = html; }
 
 /* ================= photo scanning ================= */
@@ -953,7 +955,7 @@ function renderLast() {
       <div class="last-main">
         <span class="eyebrow">Dernière carte${it.qty > 1 ? ` · ×${it.qty}` : ""}</span>
         <span class="name">${esc(it.nameFR)}</span>
-        <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
+        <span class="meta"><span class="code">${esc(it.code)}</span><span class="last-set"> · ${esc(it.set)}</span></span>
         ${(() => { const s = stockOf(it); return s ? `<span class="stock-pill">${ico("stack")} Déjà ${s.n} en stock${s.lang && s.lang !== s.n ? ` (${s.lang} ${LANG_SHORT[it.lang] || ""})` : ""}</span>` : ""; })()}
       </div>
       ${priceHtml(it)}

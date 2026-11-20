@@ -463,9 +463,11 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .mini-select select{text-overflow:clip}
 
 /* ----- Scanner: the whole page fits the screen, no scrolling (the camera area takes what is left) ----- */
-#view-scan{gap:10px;height:calc(100dvh - env(safe-area-inset-top,0px) - var(--tabs-h) - env(safe-area-inset-bottom,0px) - 28px);min-height:480px}
+#view-scan{gap:10px} .scan-screen{display:flex;flex-direction:column;gap:10px;height:calc(100dvh - env(safe-area-inset-top,0px) - var(--tabs-h) - env(safe-area-inset-bottom,0px) - 28px)}
 #view-scan > *{flex:none}
-#view-scan > .stage{flex:1 1 0;height:auto;min-height:250px}
+/* session name a little smaller on the Scanner so it takes less height */
+#view-scan .sc-name{font-size:14px}
+.scan-screen > *{flex:none} .scan-screen > .stage{flex:1 1 0;height:auto;min-height:300px}
 .scan-modes{display:flex;gap:8px;align-items:stretch}
 .scan-modes .game-mode{flex:0 0 auto}
 .scan-modes .game-mode .seg{flex:0 0 auto;width:52px;padding:6px}
@@ -476,7 +478,7 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .manual-wrap summary{min-height:44px}
 .last{gap:8px;padding:12px}
 /* the card frame sits between the status line and the buttons, never under them */
-#view-scan .guide{top:46px;bottom:100px;height:auto;transform:translateX(-50%);max-height:calc(100% - 146px)}
+#view-scan .guide{top:44px;bottom:12px;height:auto;transform:translateX(-50%);max-height:none} /* large frame: the buttons may sit over the card, the reading uses the camera image, not the screen */
 /* last card on the Scanner: compact, so the camera frame keeps its size */
 #view-scan .last{padding:10px 12px;gap:8px}
 #view-scan .last .thumb.lg{width:44px;height:64px}
@@ -490,3 +492,11 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 #view-scan .last .actions .brand-btn img{width:18px;height:18px}
 #view-scan .last .actions .ebay-logo{width:38px}
 #view-scan .last .chips .chip{min-height:32px;padding:6px 10px}
+/* scanning help: shown inside the camera area, at the top, instead of pushing the page down */
+#view-scan .scan-hint{position:absolute;left:10px;right:10px;top:50px;z-index:3;padding:8px 10px;gap:8px;background:rgba(36,22,6,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+#view-scan .scan-hint .hint-ico{width:28px;height:28px;border-radius:8px}
+#view-scan .scan-hint .hint-ico .ico{width:18px;height:18px}
+#view-scan .scan-hint strong{font-size:13px}
+#view-scan .scan-hint span{font-size:12px;line-height:1.3}
+#view-scan .last .last-set{display:none}
+#view-scan .controls .round-btn,#view-scan .shutter{opacity:.92}
