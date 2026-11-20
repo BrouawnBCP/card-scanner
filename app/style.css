@@ -111,6 +111,17 @@ h1{font:700 26px/1.1 var(--f-display);margin:4px 0 2px}
 .settings label.check{flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)}
 .settings label.check input{width:20px;min-height:20px}
 
+/* ----- account ----- */
+.account{margin-top:18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.acc-head{display:flex;gap:10px;align-items:center}
+.cloud{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.cloud.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.cloud.busy{background:var(--gold);animation:pulse 1s infinite}
+.cloud.err{background:var(--bad)}
+@keyframes pulse{50%{opacity:.35}}
+.acc-form{display:flex;gap:8px;flex-wrap:wrap}
+.acc-form input{flex:1 1 180px;min-width:0}
+
 /* ----- tabs / toast ----- */
 .tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(19,23,34,.94);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
 .tab{flex:1;border:0;border-radius:0;background:transparent;color:var(--muted);height:var(--tabs-h)}

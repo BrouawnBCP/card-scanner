@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <main>
@@ -76,6 +76,26 @@
     <div id="list" class="list"></div>
     <p class="empty" id="empty">Aucune carte pour l'instant. Passe sur « Scanner » et présente une carte dans le cadre.</p>
 
+    <section class="account" id="account">
+      <div class="acc-head">
+        <span class="cloud" id="cloudDot" aria-hidden="true"></span>
+        <div>
+          <strong id="accTitle">Compte</strong>
+          <div class="muted small" id="accStatus">Connecte-toi pour retrouver tes sessions sur ton PC.</div>
+        </div>
+      </div>
+      <form id="loginForm" class="acc-form" autocomplete="on">
+        <input id="loginEmail" type="email" inputmode="email" autocomplete="username" placeholder="ton@email.fr" aria-label="Adresse e-mail" required>
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="Mot de passe (8 caractères min.)" aria-label="Mot de passe" minlength="8" required>
+        <button class="btn primary" type="submit" data-mode="in">Se connecter</button>
+        <button class="btn" type="submit" data-mode="up">Créer un compte</button>
+      </form>
+      <div class="acc-form" id="accActions" hidden>
+        <button class="btn" type="button" id="syncBtn">Synchroniser</button>
+        <button class="btn small" type="button" id="logoutBtn">Se déconnecter</button>
+      </div>
+    </section>
+
     <details class="settings">
       <summary>Réglages</summary>
       <div class="grid">
@@ -114,6 +134,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="vendor/ort/ort.min.js"></script>
-<script type="module" src="app.js?v=6"></script>
+<script src="vendor/supabase/supabase.js"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>

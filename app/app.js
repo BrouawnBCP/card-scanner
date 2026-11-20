@@ -1,5 +1,5 @@
-/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "6";
+﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "8";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -30,8 +30,12 @@ let current = sessions.find((s) => s.id === store.get("cs-current", "")) || sess
 let items = current.items;
 function saveItems() {
   current.items = items; current.updatedAt = Date.now();
-  if (!store.set("cs-sessions", sessions) || !store.set("cs-current", current.id)) toast("Impossible d'enregistrer sur ce téléphone. Exporte ta liste.");
+  persist();
   renderList(); renderSessionBar();
+  scheduleSync();
+}
+function persist() {
+  if (!store.set("cs-sessions", sessions) || !store.set("cs-current", current.id)) toast("Impossible d'enregistrer sur ce téléphone. Exporte ta liste.");
 }
 function switchSession(s) { current = s; items = s.items; lastAdded = null; saveItems(); renderLast(); }
 function startNewSession() {
@@ -584,6 +588,7 @@ function renderSessionBar() {
   $("sessionCount").textContent = `${n} carte${n > 1 ? "s" : ""}`;
 }
 function deleteSession(s) {
+  const dead = store.get("cs-deleted", []); dead.push({ id: s.id, at: Date.now() }); store.set("cs-deleted", dead);
   sessions = sessions.filter((x) => x !== s);
   if (!sessions.length) sessions = [newSession()];
   if (s === current) switchSession(sessions[0]); else saveItems();
@@ -690,8 +695,105 @@ $("manualForm").addEventListener("submit", (e) => {
 let toastT;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2800); }
 
+/* ================= account & sync (Supabase) ================= */
+// Public project address and publishable key: safe in the app, the table's row-level security
+// only lets each signed-in account read and write its own sessions.
+const SUPA_URL = "https://rolyrskjpqlbsiirskko.supabase.co";
+const SUPA_KEY = "sb_publishable_k30We2l_8JEPLvNjlxihgg_8lt2vdAd";
+const sb = window.supabase?.createClient(SUPA_URL, SUPA_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "cs-auth" } }) || null;
+let user = null, syncing = false, syncAgain = false, syncTimer = null, lastSync = store.get("cs-lastsync", 0);
+
+function scheduleSync(ms = 2500) { if (!user) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, ms); }
+const toRow = (s) => ({ id: s.id, name: s.name, items: s.items, created_at: new Date(s.createdAt).toISOString(), updated_at: new Date(s.updatedAt || s.createdAt).toISOString(), deleted: false });
+async function sync() {
+  if (!sb || !user || !navigator.onLine) return;
+  if (syncing) { syncAgain = true; return; }
+  syncing = true; setCloud("busy");
+  try {
+    const { data: remote, error } = await sb.from("scan_sessions").select("id,name,items,created_at,updated_at,deleted");
+    if (error) throw error;
+    const dead = store.get("cs-deleted", []);
+    const byId = new Map(remote.map((r) => [r.id, r]));
+    let changedLocal = false;
+    // 1. bring remote changes in
+    for (const r of remote) {
+      const rt = Date.parse(r.updated_at), l = sessions.find((s) => s.id === r.id);
+      if (r.deleted) { if (l && (l.updatedAt || 0) <= rt) { sessions = sessions.filter((s) => s !== l); changedLocal = true; } continue; }
+      if (dead.some((d) => d.id === r.id && d.at >= rt)) continue;
+      if (!l) { sessions.push({ id: r.id, name: r.name, items: r.items || [], createdAt: Date.parse(r.created_at), updatedAt: rt }); changedLocal = true; }
+      else if (rt > (l.updatedAt || 0)) { l.name = r.name; l.items = r.items || []; l.updatedAt = rt; changedLocal = true; }
+    }
+    // 2. send local changes and deletions out
+    // (a brand-new empty session stays local until it holds a card, so devices don't pile up empty lists)
+    const up = sessions.filter((s) => { const r = byId.get(s.id); return r ? (s.updatedAt || 0) > Date.parse(r.updated_at) : s.items.length > 0; }).map(toRow);
+    for (const d of dead) if (!byId.get(d.id)?.deleted) up.push({ id: d.id, name: "", items: [], updated_at: new Date(d.at).toISOString(), deleted: true });
+    if (up.length) { const { error: e2 } = await sb.from("scan_sessions").upsert(up); if (e2) throw e2; }
+    store.set("cs-deleted", []);
+    if (changedLocal) {
+      if (!sessions.length) sessions = [newSession()];
+      sessions.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+      if (!sessions.includes(current)) { current = sessions[0]; lastAdded = null; }
+      else items = current.items;
+      items = current.items;
+      persist(); renderList(); renderSessionBar(); renderLast();
+      if (!$("sheet").hidden) renderSessions();
+    }
+    lastSync = Date.now(); store.set("cs-lastsync", lastSync); setCloud("ok");
+  } catch (e) {
+    console.warn(e); setCloud("err", "La synchronisation a échoué. Elle sera retentée automatiquement.");
+  } finally {
+    syncing = false;
+    if (syncAgain) { syncAgain = false; scheduleSync(500); }
+  }
+}
+function setCloud(state, msg) {
+  $("cloudDot").className = "cloud " + (state || "");
+  if (!user) return;
+  $("accStatus").textContent = msg || (state === "busy" ? "Synchronisation…" : lastSync ? `Synchronisé à ${new Date(lastSync).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Connecté");
+}
+function renderAccount() {
+  const on = !!user;
+  $("accTitle").textContent = on ? user.email : "Compte";
+  $("loginForm").hidden = on; $("accActions").hidden = !on;
+  if (on) setCloud(lastSync ? "ok" : "");
+  else { $("cloudDot").className = "cloud"; $("accStatus").textContent = sb ? "Connecte-toi pour retrouver tes sessions sur ton PC." : "Connexion indisponible (hors ligne au premier lancement ?)."; }
+}
+// E-mail + password: works without an e-mail sending service (Supabase "Confirm email" turned off).
+function authError(m = "") {
+  if (/invalid login credentials/i.test(m)) return "E-mail ou mot de passe incorrect.";
+  if (/already registered|already exists/i.test(m)) return "Ce compte existe déjà : utilise « Se connecter ».";
+  if (/password should be|at least/i.test(m)) return "Mot de passe trop court : 8 caractères minimum.";
+  if (/email not confirmed/i.test(m)) return "Compte non confirmé : désactive « Confirm email » dans Supabase (voir le guide).";
+  if (/rate limit|too many/i.test(m)) return "Trop de tentatives : réessaie dans une minute.";
+  if (/fetch|network/i.test(m)) return "Pas de connexion internet.";
+  return "Connexion impossible : " + m;
+}
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); if (!sb) return;
+  const email = $("loginEmail").value.trim(), password = $("loginPass").value;
+  if (!email || password.length < 8) { toast("Entre ton e-mail et un mot de passe d'au moins 8 caractères."); return; }
+  const signup = e.submitter?.dataset.mode === "up";
+  const btns = $("loginForm").querySelectorAll("button"); btns.forEach((b) => (b.disabled = true));
+  const { data, error } = signup ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
+  btns.forEach((b) => (b.disabled = false));
+  if (error) { toast(authError(error.message)); return; }
+  if (signup && !data.session) { toast(authError("email not confirmed")); return; }
+  $("loginPass").value = ""; toast(signup ? "Compte créé : tes sessions vont se synchroniser" : "Connecté : tes sessions vont se synchroniser");
+});
+$("syncBtn").addEventListener("click", () => sync());
+$("logoutBtn").addEventListener("click", async () => { await sb.auth.signOut(); toast("Déconnecté. Tes sessions restent sur cet appareil."); });
+if (sb) {
+  sb.auth.onAuthStateChange((_ev, session) => {
+    const was = user?.id; user = session?.user || null; renderAccount();
+    if (user && user.id !== was) scheduleSync(200);
+  });
+  window.addEventListener("online", () => scheduleSync(500));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleSync(800); });
+  setInterval(() => { if (!document.hidden) scheduleSync(0); }, 60000);
+}
+
 /* ================= boot ================= */
-bindSettings(); renderList(); renderSessionBar(); renderLast(); loadData();
+bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount(); loadData();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
   matchAll, matchManual, buildCsv, grab, detectText, recognize, readCodes, get DATA() { return DATA; },
