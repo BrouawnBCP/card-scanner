@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "5";
+const APP_VERSION = "6";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -16,7 +16,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-const settings = Object.assign({ cond: "NM", lang: "French", comment: "", priceTrend: false, sound: true, debug: false }, store.get("cs-settings", {}));
+const settings = Object.assign({ cond: "NM", lang: "French", comment: "", priceTrend: false, sound: true, debug: false, torch: false }, store.get("cs-settings", {}));
 
 /* ----- sessions: one list per scanning session ----- */
 function newSession(itemsIn = []) {
@@ -292,6 +292,8 @@ async function startCamera() {
     video.srcObject = stream; await video.play();
     try { const tr = stream.getVideoTracks()[0]; const caps = tr.getCapabilities?.() || {}; if (caps.focusMode?.includes("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch {}
     try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+    $("torchBtn").hidden = false;
+    if (settings.torch) setTorch(true, true);
   } catch (e) {
     stopCamera(false);
     setStatus(e && e.name === "NotAllowedError" ? "Accès à la caméra refusé. Autorise-le dans Réglages › Safari › Caméra." : "Caméra indisponible sur cet appareil. Utilise « Photo » ou tape le code.");
@@ -309,7 +311,26 @@ async function startCamera() {
   setStatus("Place une carte dans le cadre");
   loop();
 }
+/* ----- flash (torch). iOS 17+ accepts the "torch" constraint but may not report it back, so we keep our own state. */
+let torchOn = false;
+async function setTorch(on, quiet = false) {
+  const tr = stream?.getVideoTracks()[0];
+  if (!tr) return;
+  try {
+    await tr.applyConstraints({ advanced: [{ torch: on }] });
+    torchOn = on;
+  } catch {
+    torchOn = false;
+    if (!quiet) toast("Le flash n'est pas disponible ici (iPhone récent avec iOS 17 ou plus, dans Safari).");
+  }
+  settings.torch = torchOn && on; store.set("cs-settings", settings);
+  $("torchBtn").classList.toggle("on", torchOn);
+  $("torchBtn").setAttribute("aria-pressed", String(torchOn));
+}
+$("torchBtn").addEventListener("click", () => setTorch(!torchOn));
 function stopCamera(keepWanted = false) {
+  // stopping the camera turns the flash off; settings.torch is kept so it comes back on next start
+  torchOn = false; $("torchBtn").classList.remove("on"); $("torchBtn").hidden = true;
   scanning = false; if (!keepWanted) wantScan = false;
   stream?.getTracks().forEach((t) => t.stop()); stream = null; video.srcObject = null;
   try { wakeLock?.release(); } catch {} wakeLock = null;

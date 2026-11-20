@@ -68,6 +68,9 @@ input,select{font:500 15px var(--f-body);color:var(--ink);background:var(--sunk)
 .status .code{font-family:var(--f-mono);color:var(--gold)}
 .stage-actions{position:absolute;left:10px;right:10px;bottom:10px;display:flex;gap:8px;justify-content:center}
 .stage-actions .btn{flex:0 1 auto}
+.btn.torch::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--muted);transition:background .2s,box-shadow .2s}
+.btn.torch.on{border-color:var(--gold);color:var(--gold)}
+.btn.torch.on::before{background:var(--gold);box-shadow:0 0 8px 2px var(--gold)}
 
 .debug{margin-top:10px;background:var(--surface);border:1px dashed var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px}
 .debug canvas{width:100%;height:auto;border-radius:6px;background:#fff}
