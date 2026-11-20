@@ -380,6 +380,15 @@ body.bulk-on main{padding-bottom:calc(var(--tabs-h) + env(safe-area-inset-bottom
 .brand h1{margin:8px 0 0;font:800 30px/1.1 var(--f-display);letter-spacing:-.02em}
 .brand p{margin:0;max-width:30ch}
 .auth-form{gap:14px}
+.oauth{display:flex;flex-direction:column;gap:10px}
+.oauth[hidden],.oauth-btn[hidden]{display:none}
+.oauth-btn{gap:10px;font-weight:700;border:0}
+.oauth-btn svg{width:20px;height:20px;flex:none}
+.oauth-btn.google{background:#fff;color:#1f1f1f}
+.oauth-btn.discord{background:#5865F2;color:#fff}
+.oauth-btn:disabled{opacity:.6}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin-top:4px}
+.or::before,.or::after{content:"";flex:1;height:1px;background:currentColor;opacity:.35}
 .link-btn{background:transparent;border:0;color:var(--muted);font-weight:600;font-size:14px;align-self:center;min-height:44px;text-decoration:underline;text-underline-offset:3px}
 .home{gap:14px}
 .home-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}

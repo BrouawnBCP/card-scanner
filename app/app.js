@@ -1,5 +1,5 @@
-/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "30";
+﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
+const APP_VERSION = "31";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1446,7 +1446,8 @@ function showView(v) {
 $("tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (b) showView(b.dataset.view); });
 $("view-home").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) showView(b.dataset.go); });
 function renderHome() {
-  const name = user?.email ? user.email.split("@")[0] : "";
+  const md = user?.user_metadata || {};
+  const name = (md.full_name || md.name || md.custom_claims?.global_name || "").split(" ")[0] || (user?.email ? user.email.split("@")[0] : "");
   $("homeHello").textContent = user ? `Bonjour ${name}` : "Mode sans compte";
   const { n } = sessionStats(current);
   $("homeScanSub").textContent = n ? `Continuer « ${current.name} » · ${n} carte${n > 1 ? "s" : ""}` : `Session « ${current.name} »`;
@@ -1693,7 +1694,14 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = fals
 // only lets each signed-in account read and write its own sessions.
 const SUPA_URL = "https://rolyrskjpqlbsiirskko.supabase.co";
 const SUPA_KEY = "sb_publishable_k30We2l_8JEPLvNjlxihgg_8lt2vdAd";
-const sb = window.supabase?.createClient(SUPA_URL, SUPA_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "cs-auth" } }) || null;
+const sb = window.supabase?.createClient(SUPA_URL, SUPA_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, flowType: "implicit", storageKey: "cs-auth" } }) || null;
+// Back from Google / Discord: the access comes in the address (#access_token=…), read it once and clean the address.
+const oauthReturn = (() => {
+  const h = new URLSearchParams(location.hash.slice(1)), q = new URLSearchParams(location.search);
+  const r = { at: h.get("access_token"), rt: h.get("refresh_token"), err: h.get("error_description") || q.get("error_description") };
+  if (r.at || r.err) history.replaceState(null, "", location.pathname);
+  return r;
+})();
 let user = null, syncing = false, syncAgain = false, syncTimer = null, lastSync = store.get("cs-lastsync", 0);
 
 function scheduleSync(ms = 2500) { if (!user) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, ms); }
@@ -1791,7 +1799,7 @@ function setCloud(state, msg) {
 }
 function renderAccount() {
   const on = !!user;
-  $("accTitle").textContent = on ? user.email : "Compte";
+  $("accTitle").textContent = on ? (user.email || user.user_metadata?.full_name || "Compte connecté") : "Compte";
   $("accGuest").hidden = on; $("accActions").hidden = !on;
   if (on) setCloud(lastSync ? "ok" : "");
   else { $("cloudDot").className = "cloud"; $("accStatus").textContent = "Sans compte : tes sessions restent sur cet appareil."; }
@@ -1815,6 +1823,8 @@ function authError(m = "") {
   if (/email not confirmed/i.test(m)) return "Compte non confirmé : désactive « Confirm email » dans Supabase (voir le guide).";
   if (/rate limit|too many/i.test(m)) return "Trop de tentatives : réessaie dans une minute.";
   if (/fetch|network/i.test(m)) return "Pas de connexion internet.";
+  if (/provider is not enabled|unsupported provider/i.test(m)) return "Ce mode de connexion n'est pas encore activé.";
+  if (/access_denied|denied|cancel/i.test(m)) return "Connexion annulée.";
   return "Connexion impossible : " + m;
 }
 $("loginForm").addEventListener("submit", async (e) => {
@@ -1832,6 +1842,30 @@ $("loginForm").addEventListener("submit", async (e) => {
   $("loginPass").value = ""; renderAccount(); showView("home");
   toast(signup ? "Compte créé, bienvenue !" : "Connecté");
 });
+// Google / Discord: shown only once turned on in Supabase (Authentication → Providers).
+async function showOAuthButtons() {
+  try {
+    const r = await fetch(`${SUPA_URL}/auth/v1/settings`, { headers: { apikey: SUPA_KEY }, cache: "no-store" });
+    const ext = (await r.json()).external || {};
+    let any = false;
+    for (const b of document.querySelectorAll("[data-provider]")) { b.hidden = !ext[b.dataset.provider]; any ||= !b.hidden; }
+    $("oauthBox").hidden = !any;
+  } catch { /* offline: e-mail only */ }
+}
+$("oauthBox").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-provider]"); if (!b) return;
+  if (!sb || !navigator.onLine) { toast("Pas de connexion internet."); return; }
+  b.disabled = true;
+  const { error } = await sb.auth.signInWithOAuth({ provider: b.dataset.provider, options: { redirectTo: location.origin + location.pathname } });
+  if (error) { b.disabled = false; toast(authError(error.message)); }
+  setTimeout(() => { b.disabled = false; }, 8000); // came back without signing in
+});
+if (sb) showOAuthButtons();
+if (sb && oauthReturn.at) {
+  store.set("cs-guest", false);
+  sb.auth.setSession({ access_token: oauthReturn.at, refresh_token: oauthReturn.rt || "" })
+    .then(({ error }) => toast(error ? authError(error.message) : "Connecté"));
+} else if (oauthReturn.err) setTimeout(() => toast(authError(oauthReturn.err)), 600);
 $("syncBtn").addEventListener("click", () => sync());
 $("logoutBtn").addEventListener("click", async () => {
   await sb.auth.signOut(); store.set("cs-guest", false);
@@ -1845,7 +1879,7 @@ let routed = false;
 const hasStoredSession = () => { try { return !!localStorage.getItem("cs-auth"); } catch { return false; } };
 function route() {
   if (routed) return; routed = true;
-  showView(user || hasStoredSession() || store.get("cs-guest", false) ? "home" : "auth");
+  showView(user || hasStoredSession() || oauthReturn.at || store.get("cs-guest", false) ? "home" : "auth");
   $("splash").hidden = true;
 }
 setTimeout(route, 2500); // never stay on the splash (no network, auth library missing…)
