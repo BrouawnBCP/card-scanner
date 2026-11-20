@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Card Scanner</title>
 <meta name="description" content="Scanne tes cartes Yu-Gi-Oh au téléphone et exporte un CSV pour Cardmarket.">
-<meta name="theme-color" content="#0f121a">
+<meta name="theme-color" content="#0b0e15">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -13,128 +13,236 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
+
+<!-- Icon set (stroke icons, 24px grid) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M7 12h10"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-flash" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M8 16h8M10 13h4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-stack" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.6 1.5A3.5 3.5 0 0 1 17.5 18z"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><rect x="8" y="6" width="8" height="7" rx="1"/><path d="M8 16h8M8 18.5h5"/></symbol>
+</svg>
+
 <main>
-  <!-- ===== Scanner view ===== -->
-  <section id="view-scan" class="view">
-    <div class="sessionbar" id="sessionBar" role="button" tabindex="0" aria-label="Voir mes sessions">
-      <div class="sb-text">
-        <span class="sb-label">Session en cours</span>
-        <span class="sb-name" id="sessionName">—</span>
-      </div>
-      <span class="sb-count" id="sessionCount">0 carte</span>
-      <button class="btn small" id="newSessionBtn" type="button">Nouvelle</button>
+  <!-- ===== Connexion ===== -->
+  <section id="view-auth" class="view auth" hidden>
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" width="72" height="72">
+      <h1>Card Scanner</h1>
+      <p class="muted">Scanne tes cartes Yu-Gi-Oh, retrouve tes listes partout.</p>
     </div>
+    <form id="loginForm" class="panel auth-form" autocomplete="on">
+      <div class="segmented" id="authMode" role="tablist">
+        <button type="button" class="seg on" data-mode="in">Se connecter</button>
+        <button type="button" class="seg" data-mode="up">Créer un compte</button>
+      </div>
+      <label class="field">E-mail
+        <input id="loginEmail" type="email" inputmode="email" autocomplete="username" placeholder="ton@email.fr" required>
+      </label>
+      <label class="field">Mot de passe
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="8 caractères minimum" minlength="8" required>
+      </label>
+      <button class="btn primary wide" type="submit" id="authSubmit">Se connecter</button>
+    </form>
+    <button class="link-btn" type="button" id="guestBtn">Continuer sans compte</button>
+  </section>
+
+  <!-- ===== Accueil ===== -->
+  <section id="view-home" class="view home" hidden>
+    <header class="home-head">
+      <div>
+        <p class="muted small" id="homeHello">Bonjour</p>
+        <h1 class="page-title">Que veux-tu faire&nbsp;?</h1>
+      </div>
+      <span class="sync-pill" id="homeSync"><span class="cloud-dot"></span><span id="homeSyncTxt">Hors compte</span></span>
+    </header>
+
+    <button class="tile tile-scan" data-go="scan">
+      <span class="tile-ico"><svg class="ico"><use href="#i-scan"/></svg></span>
+      <span class="tile-txt">
+        <strong>Scanner des cartes</strong>
+        <span id="homeScanSub">Reprendre la session en cours</span>
+      </span>
+      <svg class="ico chev"><use href="#i-chev"/></svg>
+    </button>
+
+    <div class="tiles-2">
+      <button class="tile" data-go="list">
+        <span class="tile-ico"><svg class="ico"><use href="#i-list"/></svg></span>
+        <span class="tile-txt"><strong>Mes listes</strong><span id="homeListSub">0 session</span></span>
+      </button>
+      <button class="tile" data-go="settings">
+        <span class="tile-ico"><svg class="ico"><use href="#i-gear"/></svg></span>
+        <span class="tile-txt"><strong>Réglages</strong><span>Compte, préférences</span></span>
+      </button>
+    </div>
+
+    <div class="home-stats">
+      <div class="stat"><span class="stat-v" id="homeCards">0</span><span class="stat-l">cartes au total</span></div>
+      <div class="stat"><span class="stat-v" id="homeValue">—</span><span class="stat-l">cote estimée</span></div>
+    </div>
+  </section>
+
+  <!-- ===== Scanner ===== -->
+  <section id="view-scan" class="view" hidden>
+    <div class="topbar">
+      <button class="session-chip" id="sessionBar" type="button" aria-label="Voir mes sessions">
+        <span class="sc-dot" aria-hidden="true"></span>
+        <span class="sc-name" id="sessionName">—</span>
+        <span class="sc-count" id="sessionCount">0</span>
+        <svg class="ico sm" aria-hidden="true"><use href="#i-chev"/></svg>
+      </button>
+      <button class="icon-btn" id="newSessionBtn" type="button" aria-label="Nouvelle session" title="Nouvelle session">
+        <svg class="ico"><use href="#i-plus"/></svg>
+      </button>
+    </div>
+
     <div class="stage" id="stage">
       <video id="video" playsinline muted autoplay></video>
       <div class="guide" id="guide" aria-hidden="true">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <span class="scanline"></span>
       </div>
-      <div class="status" id="status" role="status">Appuie sur « Démarrer » pour lancer la caméra</div>
-      <div class="stage-actions">
-        <button id="startBtn" class="btn primary">Démarrer</button>
-        <button id="torchBtn" class="btn ghost torch" aria-pressed="false" hidden>Flash</button>
-        <label class="btn ghost" title="Analyser une photo">Photo
+      <div class="status" id="status" role="status">Appuie sur le bouton pour lancer la caméra</div>
+      <div class="controls">
+        <button id="torchBtn" class="round-btn torch" aria-pressed="false" aria-label="Flash" disabled>
+          <svg class="ico"><use href="#i-flash"/></svg>
+        </button>
+        <button id="startBtn" class="shutter" aria-label="Démarrer le scan"><span></span></button>
+        <label class="round-btn" aria-label="Analyser une photo" title="Analyser une photo">
+          <svg class="ico"><use href="#i-image"/></svg>
           <input type="file" id="photoInput" accept="image/*" hidden>
         </label>
       </div>
     </div>
 
+    <div class="last" id="last" hidden></div>
+
+    <details class="manual-wrap" id="manualWrap">
+      <summary><svg class="ico sm"><use href="#i-keyboard"/></svg> Saisir un code à la main</summary>
+      <form class="manual" id="manualForm" autocomplete="off">
+        <input id="manualCode" class="mono" placeholder="MP20-FR167" aria-label="Code de set">
+        <button class="btn primary" type="submit">Ajouter</button>
+      </form>
+    </details>
+
     <div class="debug" id="debug" hidden>
-      <div class="muted small">Ce que voit le scanner :</div>
+      <div class="muted small">Diagnostic : ce que lit le scanner</div>
       <canvas id="debugCanvas"></canvas>
       <pre id="debugText"></pre>
     </div>
-
-    <div class="last" id="last" hidden></div>
-
-    <form class="manual" id="manualForm" autocomplete="off">
-      <input id="manualCode" class="mono" placeholder="Taper un code : MP20-FR167" aria-label="Code de set">
-      <button class="btn" type="submit">Ajouter</button>
-    </form>
   </section>
 
-  <!-- ===== List view ===== -->
+  <!-- ===== Liste ===== -->
   <section id="view-list" class="view" hidden>
     <header class="list-head">
-      <div class="title-wrap">
-        <input id="sessionTitle" class="title-input" aria-label="Nom de la session" maxlength="60">
-        <p class="muted" id="totals">0 carte</p>
-      </div>
-      <div class="head-actions">
-        <button class="btn" id="sessionsBtn">Sessions</button>
-        <button class="btn primary" id="exportBtn">Exporter CSV</button>
-      </div>
+      <input id="sessionTitle" class="title-input" aria-label="Nom de la session" maxlength="60">
+      <button class="icon-btn" id="sessionsBtn" aria-label="Mes sessions" title="Mes sessions"><svg class="ico"><use href="#i-stack"/></svg></button>
     </header>
-    <p class="muted small" id="exportNote"></p>
-    <div class="filters">
-      <button class="chip on" data-filter="all">Tout</button>
-      <button class="chip" data-filter="todo">À vérifier</button>
+    <div class="stats">
+      <div class="stat"><span class="stat-v" id="statCards">0</span><span class="stat-l">cartes</span></div>
+      <div class="stat"><span class="stat-v" id="statValue">—</span><span class="stat-l" id="statValueL">cote estimée</span></div>
+      <div class="stat warn" id="statTodoBox"><span class="stat-v" id="statTodo">0</span><span class="stat-l">à vérifier</span></div>
     </div>
+    <div class="list-tools">
+      <div class="segmented filters" role="tablist">
+        <button class="seg on" data-filter="all">Tout</button>
+        <button class="seg" data-filter="todo">À vérifier</button>
+      </div>
+      <button class="btn primary" id="exportBtn"><svg class="ico sm"><use href="#i-share"/></svg> Exporter</button>
+    </div>
+    <p class="note" id="exportNote" hidden></p>
     <div id="list" class="list"></div>
-    <p class="empty" id="empty">Aucune carte pour l'instant. Passe sur « Scanner » et présente une carte dans le cadre.</p>
+    <div class="empty" id="empty">
+      <svg class="ico xl" aria-hidden="true"><use href="#i-card"/></svg>
+      <p>Aucune carte dans cette session.</p>
+      <p class="muted small">Passe sur « Scanner » et présente une carte devant la caméra.</p>
+    </div>
+  </section>
 
-    <section class="account" id="account">
+  <!-- ===== Réglages ===== -->
+  <section id="view-settings" class="view" hidden>
+    <h1 class="page-title">Réglages</h1>
+
+    <section class="panel account" id="account">
       <div class="acc-head">
-        <span class="cloud" id="cloudDot" aria-hidden="true"></span>
-        <div>
+        <span class="acc-ico"><svg class="ico"><use href="#i-cloud"/></svg><span class="cloud" id="cloudDot"></span></span>
+        <div class="acc-txt">
           <strong id="accTitle">Compte</strong>
           <div class="muted small" id="accStatus">Connecte-toi pour retrouver tes sessions sur ton PC.</div>
         </div>
       </div>
-      <form id="loginForm" class="acc-form" autocomplete="on">
-        <input id="loginEmail" type="email" inputmode="email" autocomplete="username" placeholder="ton@email.fr" aria-label="Adresse e-mail" required>
-        <input id="loginPass" type="password" autocomplete="current-password" placeholder="Mot de passe (8 caractères min.)" aria-label="Mot de passe" minlength="8" required>
-        <button class="btn primary" type="submit" data-mode="in">Se connecter</button>
-        <button class="btn" type="submit" data-mode="up">Créer un compte</button>
-      </form>
-      <div class="acc-form" id="accActions" hidden>
+      <div class="acc-btns" id="accGuest">
+        <button class="btn primary" type="button" id="toAuthBtn">Se connecter ou créer un compte</button>
+      </div>
+      <div class="acc-btns" id="accActions" hidden>
         <button class="btn" type="button" id="syncBtn">Synchroniser</button>
-        <button class="btn small" type="button" id="logoutBtn">Se déconnecter</button>
+        <button class="btn ghost-btn" type="button" id="logoutBtn">Se déconnecter</button>
       </div>
     </section>
 
-    <details class="settings">
-      <summary>Réglages</summary>
-      <div class="grid">
-        <label>État par défaut
-          <select id="setCond"><option>MT</option><option selected>NM</option><option>EX</option><option>GD</option><option>LP</option><option>PL</option><option>PO</option></select>
-        </label>
-        <label>Langue si code sans langue
-          <select id="setLang"><option>French</option><option>English</option><option>German</option><option>Italian</option><option>Spanish</option><option>Portuguese</option></select>
-        </label>
-        <label>Commentaire par défaut
-          <input id="setComment" placeholder="ex. CM40-01">
-        </label>
-        <label class="check"><input type="checkbox" id="setPriceTrend"> Prix de vente = cote tendance</label>
-        <label class="check"><input type="checkbox" id="setSound" checked> Bip à chaque carte</label>
-        <label class="check"><input type="checkbox" id="setDebug"> Mode diagnostic (voir ce que lit le scanner)</label>
-      </div>
-      <p class="muted small" id="dataInfo"></p>
-      <button class="btn danger" id="clearBtn">Supprimer cette session</button>
-    </details>
+    <section class="panel">
+      <h2 class="panel-title">Nouvelles cartes</h2>
+      <label class="field">État par défaut
+        <select id="setCond"><option>MT</option><option selected>NM</option><option>EX</option><option>GD</option><option>LP</option><option>PL</option><option>PO</option></select>
+      </label>
+      <label class="field">Langue si le code n'en indique pas
+        <select id="setLang"><option value="French">Français</option><option value="English">Anglais</option><option value="German">Allemand</option><option value="Italian">Italien</option><option value="Spanish">Espagnol</option><option value="Portuguese">Portugais</option></select>
+      </label>
+      <label class="field">Commentaire par défaut
+        <input id="setComment" placeholder="ex. CM40-01">
+      </label>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Scan et export</h2>
+      <label class="switch"><span>Prix de vente = cote tendance</span><input type="checkbox" id="setPriceTrend"><i></i></label>
+      <label class="switch"><span>Bip à chaque carte</span><input type="checkbox" id="setSound" checked><i></i></label>
+      <label class="switch"><span>Mode diagnostic</span><input type="checkbox" id="setDebug"><i></i></label>
+    </section>
+
+    <button class="btn danger wide" id="clearBtn"><svg class="ico sm"><use href="#i-trash"/></svg> Supprimer cette session</button>
+    <p class="muted small center" id="dataInfo"></p>
   </section>
 </main>
 
-<nav class="tabs">
-  <button class="tab on" data-view="scan">Scanner</button>
-  <button class="tab" data-view="list">Liste <span id="tabCount" class="badge">0</span></button>
+<nav class="tabs" id="tabs" hidden>
+  <button class="tab" data-view="home"><svg class="ico"><use href="#i-home"/></svg><span>Accueil</span></button>
+  <button class="tab" data-view="scan"><svg class="ico"><use href="#i-scan"/></svg><span>Scanner</span></button>
+  <button class="tab" data-view="list"><svg class="ico"><use href="#i-list"/></svg><span>Liste</span><b id="tabCount" class="badge">0</b></button>
+  <button class="tab" data-view="settings"><svg class="ico"><use href="#i-gear"/></svg><span>Réglages</span></button>
 </nav>
 
 <div class="sheet" id="sheet" hidden>
   <div class="sheet-card" role="dialog" aria-label="Mes sessions">
+    <div class="grabber" aria-hidden="true"></div>
     <header><h2>Mes sessions</h2><button class="btn small" id="sheetClose">Fermer</button></header>
     <div id="sessionList" class="slist"></div>
-    <button class="btn primary" id="sheetNew">Nouvelle session</button>
+    <button class="btn primary wide" id="sheetNew"><svg class="ico sm"><use href="#i-plus"/></svg> Nouvelle session</button>
   </div>
 </div>
+
+<div class="splash" id="splash"><img src="icons/icon-192.png" alt="" width="64" height="64"></div>
 
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=8"></script>
+<script type="module" src="app.js?v=10"></script>
 </body>
 </html>

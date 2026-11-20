@@ -1,5 +1,5 @@
 ﻿/* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "8";
+const APP_VERSION = "10";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -296,7 +296,7 @@ async function startCamera() {
     video.srcObject = stream; await video.play();
     try { const tr = stream.getVideoTracks()[0]; const caps = tr.getCapabilities?.() || {}; if (caps.focusMode?.includes("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch {}
     try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
-    $("torchBtn").hidden = false;
+    $("torchBtn").disabled = false;
     if (settings.torch) setTorch(true, true);
   } catch (e) {
     stopCamera(false);
@@ -311,9 +311,14 @@ async function startCamera() {
     setStatus("Le moteur de lecture n'a pas pu démarrer. Vérifie ta connexion puis réessaie."); return;
   }
   scanning = wantScan = true; reads = []; changed = true;
-  $("startBtn").textContent = "Pause";
+  setShutter(true);
   setStatus("Place une carte dans le cadre");
   loop();
+}
+function setShutter(on) {
+  const b = $("startBtn"); b.classList.toggle("on", on);
+  b.setAttribute("aria-label", on ? "Mettre le scan en pause" : "Démarrer le scan");
+  $("stage").classList.toggle("live", on);
 }
 /* ----- flash (torch). iOS 17+ accepts the "torch" constraint but may not report it back, so we keep our own state. */
 let torchOn = false;
@@ -334,11 +339,11 @@ async function setTorch(on, quiet = false) {
 $("torchBtn").addEventListener("click", () => setTorch(!torchOn));
 function stopCamera(keepWanted = false) {
   // stopping the camera turns the flash off; settings.torch is kept so it comes back on next start
-  torchOn = false; $("torchBtn").classList.remove("on"); $("torchBtn").hidden = true;
+  torchOn = false; $("torchBtn").classList.remove("on"); $("torchBtn").disabled = true;
   scanning = false; if (!keepWanted) wantScan = false;
   stream?.getTracks().forEach((t) => t.stop()); stream = null; video.srcObject = null;
   try { wakeLock?.release(); } catch {} wakeLock = null;
-  $("startBtn").textContent = "Démarrer";
+  setShutter(false);
   if (!keepWanted) setStatus("En pause");
 }
 async function loop() {
@@ -487,6 +492,29 @@ const cmLink = (it) => {
 };
 
 /* ================= rendering ================= */
+// Short rarity labels and the colour family of their badge.
+const RAR = {
+  "Common": ["C", "r-c"], "Rare": ["R", "r-r"], "Super Rare": ["SR", "r-sr"], "Ultra Rare": ["UR", "r-ur"],
+  "Secret Rare": ["ScR", "r-scr"], "Prismatic Secret Rare": ["PScR", "r-scr"], "Ultimate Rare": ["UtR", "r-ur"],
+  "Quarter Century Secret Rare": ["QCSR", "r-scr"], "Starlight Rare": ["StR", "r-scr"], "Platinum Secret Rare": ["PlScR", "r-scr"],
+  "Collector's Rare": ["CR", "r-scr"], "Collectors Rare": ["CR", "r-scr"], "Ghost Rare": ["GR", "r-r"], "Gold Rare": ["GUR", "r-gold"],
+  "Premium Gold Rare": ["PGR", "r-gold"], "Gold Secret Rare": ["GScR", "r-gold"], "Platinum Rare": ["PlR", "r-r"],
+  "Starfoil Rare": ["SFR", "r-sr"], "Mosaic Rare": ["MSR", "r-sr"], "Shatterfoil Rare": ["SHR", "r-sr"], "Ultra Parallel Rare": ["UPR", "r-ur"],
+  "Short Print": ["SP", "r-c"], "Super Short Print": ["SSP", "r-c"],
+};
+function rarBadge(r) {
+  if (!r) return `<span class="rar r-q" title="Rareté à choisir">?</span>`;
+  const [s, cls] = RAR[r] || [r.split(/\s+/).map((w) => w[0]).join("").slice(0, 4), "r-c"];
+  return `<span class="rar ${cls}" title="${esc(r)}">${esc(s)}</span>`;
+}
+const num = (n) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const priceHtml = (cm) => {
+  const p = cmPrice(cm);
+  if (!p) return `<span class="price range">—</span>`;
+  return p.lo === p.hi ? `<span class="price">${esc(eur(p.lo))}</span>` : `<span class="price range" title="Plusieurs versions possibles">${num(p.lo)}–${num(p.hi)} €</span>`;
+};
+const ico = (id) => `<svg class="ico"><use href="#i-${id}"/></svg>`;
+
 function renderLast() {
   const box = $("last");
   const it = lastAdded && items.find((x) => x.id === lastAdded.id);
@@ -494,18 +522,23 @@ function renderLast() {
   const fresh = box.dataset.id !== it.id + ":" + it.qty;
   box.dataset.id = it.id + ":" + it.qty;
   box.hidden = false; box.className = "last" + (it.rarity ? "" : " todo") + (fresh ? " enter" : "");
-  const p = priceText(cmPrice(it.cm));
   box.innerHTML = `
-    <div class="row1"><span class="name">${esc(it.nameFR)}</span><span class="price">${esc(p || "cote ?")}</span></div>
-    <div class="sub"><span class="code">${esc(it.code)}</span> · ${esc(it.set)} · <span class="lang">${LANG_SHORT[it.lang] || ""}</span>${it.qty > 1 ? ` · ×${it.qty}` : ""}</div>
-    ${it.cands.length > 1 ? `<div class="sub">${it.rarity ? "Rareté :" : "<span class=flag>Choisis la rareté :</span>"}</div>
-      <div class="chips">${it.cands.map((c) => `<button class="chip ${c.rarity === it.rarity ? "on" : ""}" data-rar="${esc(c.rarity)}">${esc(c.rarity)}</button>`).join("")}</div>`
-      : `<div class="chips"><span class="chip on">${esc(it.rarity)}</span></div>`}
-    <div class="chips">
-      <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed">1re édition</button>
-      <button class="chip" data-act="plus">+1 exemplaire</button>
-      <button class="chip" data-act="undo">Annuler</button>
-      <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"}) ↗</a>
+    <div class="last-top">
+      ${rarBadge(it.rarity)}
+      <div class="last-main">
+        <span class="eyebrow">Dernière carte${it.qty > 1 ? ` · ×${it.qty}` : ""}</span>
+        <span class="name">${esc(it.nameFR)}</span>
+        <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
+      </div>
+      ${priceHtml(it.cm)}
+    </div>
+    ${it.cands.length > 1 ? `${it.rarity ? "" : `<span class="ask">Quelle rareté ?</span>`}
+      <div class="chips">${it.cands.map((c) => `<button class="chip ${c.rarity === it.rarity ? "on" : ""}" data-rar="${esc(c.rarity)}">${esc(c.rarity)}</button>`).join("")}</div>` : ""}
+    <div class="actions">
+      <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
+      <button class="chip" data-act="plus">${ico("plus")} 1</button>
+      <button class="chip" data-act="undo">${ico("undo")} Annuler</button>
+      <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket ${LANG_SHORT[it.lang] || ""}</a>
     </div>`;
 }
 $("last").addEventListener("click", (e) => {
@@ -518,37 +551,49 @@ $("last").addEventListener("click", (e) => {
   saveItems(); renderLast();
 });
 
-let filter = "all";
+let filter = "all", openId = null;
 function renderList() {
   const total = items.reduce((n, x) => n + x.qty, 0);
   let value = 0, priced = 0;
   for (const x of items) { const p = cmPrice(x.cm); if (p && p.lo === p.hi) { value += p.lo * x.qty; priced += x.qty; } }
-  $("tabCount").textContent = total;
-  if (document.activeElement !== $("sessionTitle")) $("sessionTitle").value = current.name;
-  $("totals").textContent = `${total} carte${total > 1 ? "s" : ""}` + (priced ? ` · cote ≈ ${eur(value)}${priced < total ? ` (sur ${priced})` : ""}` : "");
   const todo = items.filter((x) => !x.rarity).length;
-  $("exportNote").textContent = todo ? `${todo} ligne${todo > 1 ? "s" : ""} sans rareté : elles ne seront pas exportées tant que tu ne l'as pas choisie.` : "";
+  $("tabCount").textContent = total; $("tabCount").classList.toggle("zero", !total);
+  if (document.activeElement !== $("sessionTitle")) $("sessionTitle").value = current.name;
+  $("statCards").textContent = total;
+  $("statValue").textContent = priced ? eur(value).replace(/\s?€/, " €") : "—";
+  $("statValueL").textContent = priced && priced < total ? `cote (${priced}/${total})` : "cote estimée";
+  $("statTodo").textContent = todo; $("statTodoBox").classList.toggle("has", todo > 0);
+  $("exportNote").hidden = !todo;
+  $("exportNote").textContent = `${todo} carte${todo > 1 ? "s" : ""} sans rareté : choisis-la pour qu'elle${todo > 1 ? "s soient exportées" : " soit exportée"}.`;
   const shown = filter === "todo" ? items.filter((x) => !x.rarity) : items;
   $("empty").hidden = items.length > 0;
   $("list").innerHTML = shown.map((it) => {
-    const p = priceText(cmPrice(it.cm));
-    const isNew = Date.now() - it.createdAt < 1500;
+    const isNew = Date.now() - it.createdAt < 1500, open = openId === it.id;
     return `<div class="item ${it.rarity ? "" : "todo"} ${isNew ? "enter" : ""}" data-id="${it.id}">
-      <div class="row1" style="display:flex;justify-content:space-between;gap:8px"><span class="name">${esc(it.nameFR)}</span><span class="price">${esc(p)}</span></div>
-      <div class="sub"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</div>
-      <a class="cm-link" href="${cmLink(it)}" target="_blank" rel="noopener">Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"}) ↗</a>
-      <div class="row">
-        ${it.cands.length > 1 ? `<select data-f="rarity" aria-label="Rareté">${it.rarity ? "" : `<option value="">Rareté ?</option>`}${it.cands.map((c) => `<option ${c.rarity === it.rarity ? "selected" : ""}>${esc(c.rarity)}</option>`).join("")}</select>` : `<span class="chip on">${esc(it.rarity)}</span>`}
-        <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed">1re éd.</button>
-        <select data-f="condition" aria-label="État">${COND.map((c) => `<option ${c === it.condition ? "selected" : ""}>${c}</option>`).join("")}</select>
-        <select data-f="lang" aria-label="Langue">${LANGS.map((l) => `<option value="${l}" ${l === it.lang ? "selected" : ""}>${LANG_SHORT[l]}</option>`).join("")}</select>
-      </div>
-      <div class="row">
-        <span class="qty"><button data-act="minus" aria-label="Moins">−</button><span>${it.qty}</span><button data-act="plus" aria-label="Plus">+</button></span>
-        <input class="price-in" data-f="price" inputmode="decimal" placeholder="Prix €" value="${esc(it.price)}" aria-label="Prix">
-        <input data-f="comment" placeholder="Commentaire" value="${esc(it.comment)}" aria-label="Commentaire" style="flex:1;min-width:90px">
-        <button class="del" data-act="del">Supprimer</button>
-      </div>
+      <button class="row-main" data-act="toggle" aria-expanded="${open}">
+        ${rarBadge(it.rarity)}
+        <span class="row-text">
+          <span class="name">${esc(it.nameFR)}</span>
+          <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
+        </span>
+        <span class="row-side">
+          ${priceHtml(it.cm)}
+          <span class="tags">${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span><span class="tag">${esc(it.condition)}</span></span>
+        </span>
+      </button>
+      ${open ? `<div class="edit">
+        ${it.cands.length > 1 ? `<label class="full">Rareté<select data-f="rarity">${it.rarity ? "" : `<option value="">À choisir…</option>`}${it.cands.map((c) => `<option ${c.rarity === it.rarity ? "selected" : ""}>${esc(c.rarity)}</option>`).join("")}</select></label>` : ""}
+        <label>État<select data-f="condition">${COND.map((c) => `<option ${c === it.condition ? "selected" : ""}>${c}</option>`).join("")}</select></label>
+        <label>Langue<select data-f="lang">${LANGS.map((l) => `<option value="${l}" ${l === it.lang ? "selected" : ""}>${LANG_SHORT[l]}</option>`).join("")}</select></label>
+        <label>Prix de vente<input data-f="price" inputmode="decimal" placeholder="€" value="${esc(it.price)}"></label>
+        <label>Commentaire<input data-f="comment" placeholder="—" value="${esc(it.comment)}"></label>
+        <div class="edit-row full">
+          <span class="qty"><button data-act="minus" aria-label="Retirer un exemplaire">${ico("minus")}</button><span>${it.qty}</span><button data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")}</button></span>
+          <button class="chip ${it.firstEd ? "on" : ""}" data-act="ed" aria-pressed="${it.firstEd}">1re édition</button>
+          <a class="chip" href="${cmLink(it)}" target="_blank" rel="noopener">${ico("ext")} Cardmarket</a>
+          <button class="del" data-act="del">${ico("trash")}</button>
+        </div>
+      </div>` : ""}
     </div>`;
   }).join("");
 }
@@ -557,10 +602,11 @@ $("list").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const it = itemOf(b); if (!it) return;
   const a = b.dataset.act;
+  if (a === "toggle") { openId = openId === it.id ? null : it.id; renderList(); return; }
   if (a === "plus") it.qty += 1;
   else if (a === "minus") { if (it.qty <= 1) return; it.qty -= 1; }
   else if (a === "ed") it.firstEd = !it.firstEd;
-  else if (a === "del") items = items.filter((x) => x !== it);
+  else if (a === "del") { items = items.filter((x) => x !== it); openId = null; toast(`${it.nameFR} retirée`); }
   saveItems(); renderLast();
 });
 $("list").addEventListener("change", (e) => {
@@ -573,7 +619,7 @@ $("list").addEventListener("change", (e) => {
 document.querySelector(".filters").addEventListener("click", (e) => {
   const b = e.target.closest("[data-filter]"); if (!b) return;
   filter = b.dataset.filter;
-  document.querySelectorAll(".filters .chip").forEach((c) => c.classList.toggle("on", c === b));
+  document.querySelectorAll(".filters .seg").forEach((c) => c.classList.toggle("on", c === b));
   renderList();
 });
 
@@ -585,7 +631,7 @@ function sessionStats(s) {
 function renderSessionBar() {
   $("sessionName").textContent = current.name;
   const { n } = sessionStats(current);
-  $("sessionCount").textContent = `${n} carte${n > 1 ? "s" : ""}`;
+  $("sessionCount").textContent = n;
 }
 function deleteSession(s) {
   const dead = store.get("cs-deleted", []); dead.push({ id: s.id, at: Date.now() }); store.set("cs-deleted", dead);
@@ -600,8 +646,8 @@ function renderSessions() {
     const d = new Date(s.updatedAt || s.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
     return `<div class="srow ${s === current ? "on" : ""}" data-sid="${s.id}">
       <button class="sopen" data-act="open"><span class="name">${esc(s.name)}</span>
-        <span class="sub">${n} carte${n > 1 ? "s" : ""}${v ? ` · ≈ ${eur(v)}` : ""} · ${d}${s === current ? " · en cours" : ""}</span></button>
-      <button class="del" data-act="del">${delArmed === s.id ? "Confirmer ?" : "Supprimer"}</button>
+        <span class="meta">${n} carte${n > 1 ? "s" : ""}${v ? ` · ≈ ${eur(v)}` : ""} · ${d}${s === current ? " · en cours" : ""}</span></button>
+      <button class="del" data-act="del" aria-label="Supprimer la session">${delArmed === s.id ? "Confirmer ?" : ico("trash")}</button>
     </div>`;
   }).join("");
 }
@@ -669,17 +715,41 @@ function bindSettings() {
 }
 let clearArmed = 0;
 $("clearBtn").addEventListener("click", () => {
-  if (Date.now() - clearArmed > 4000) { clearArmed = Date.now(); $("clearBtn").textContent = "Confirmer : supprimer cette session ?"; setTimeout(() => ($("clearBtn").textContent = "Supprimer cette session"), 4000); return; }
-  clearArmed = 0; deleteSession(current); $("clearBtn").textContent = "Supprimer cette session"; toast("Session supprimée");
+  const idle = `${ico("trash")} Supprimer cette session`;
+  if (Date.now() - clearArmed > 4000) { clearArmed = Date.now(); $("clearBtn").innerHTML = `${ico("trash")} Confirmer la suppression ?`; setTimeout(() => ($("clearBtn").innerHTML = idle), 4000); return; }
+  clearArmed = 0; deleteSession(current); $("clearBtn").innerHTML = idle; toast("Session supprimée");
 });
-document.querySelector(".tabs").addEventListener("click", (e) => {
-  const b = e.target.closest(".tab"); if (!b) return;
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t === b));
-  const v = b.dataset.view;
-  $("view-scan").hidden = v !== "scan"; $("view-list").hidden = v !== "list";
-  if (v === "list" && scanning) stopCamera(true);
+/* ----- pages: auth → home → scanner / lists / settings ----- */
+const VIEWS = ["auth", "home", "scan", "list", "settings"];
+let view = null;
+function showView(v) {
+  view = v;
+  for (const n of VIEWS) $("view-" + n).hidden = v !== n;
+  $("tabs").hidden = v === "auth";
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.view === v));
+  window.scrollTo(0, 0);
+  if (v !== "scan" && scanning) stopCamera(true);
   if (v === "scan" && wantScan && !scanning) startCamera();
-});
+  if (v === "home") renderHome();
+}
+$("tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (b) showView(b.dataset.view); });
+$("view-home").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) showView(b.dataset.go); });
+function renderHome() {
+  const name = user?.email ? user.email.split("@")[0] : "";
+  $("homeHello").textContent = user ? `Bonjour ${name}` : "Mode sans compte";
+  const { n } = sessionStats(current);
+  $("homeScanSub").textContent = n ? `Continuer « ${current.name} » · ${n} carte${n > 1 ? "s" : ""}` : `Session « ${current.name} »`;
+  $("homeListSub").textContent = `${sessions.length} session${sessions.length > 1 ? "s" : ""}`;
+  let cards = 0, val = 0; for (const s of sessions) { const st = sessionStats(s); cards += st.n; val += st.v; }
+  $("homeCards").textContent = cards;
+  $("homeValue").textContent = val ? eur(val) : "—";
+  updateHomeSync();
+}
+function updateHomeSync(state) {
+  const pill = $("homeSync");
+  pill.className = "sync-pill " + (user ? (state || (lastSync ? "ok" : "")) : "");
+  $("homeSyncTxt").textContent = !user ? "Sans compte" : state === "busy" ? "Synchro…" : state === "err" ? "Synchro en échec" : "Synchronisé";
+}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && scanning) stopCamera(true);
   else if (!document.hidden && wantScan && !scanning && !$("view-scan").hidden) startCamera();
@@ -749,15 +819,28 @@ async function sync() {
 function setCloud(state, msg) {
   $("cloudDot").className = "cloud " + (state || "");
   if (!user) return;
+  updateHomeSync(state);
+  if (view === "home" && state === "ok") renderHome();
   $("accStatus").textContent = msg || (state === "busy" ? "Synchronisation…" : lastSync ? `Synchronisé à ${new Date(lastSync).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Connecté");
 }
 function renderAccount() {
   const on = !!user;
   $("accTitle").textContent = on ? user.email : "Compte";
-  $("loginForm").hidden = on; $("accActions").hidden = !on;
+  $("accGuest").hidden = on; $("accActions").hidden = !on;
   if (on) setCloud(lastSync ? "ok" : "");
-  else { $("cloudDot").className = "cloud"; $("accStatus").textContent = sb ? "Connecte-toi pour retrouver tes sessions sur ton PC." : "Connexion indisponible (hors ligne au premier lancement ?)."; }
+  else { $("cloudDot").className = "cloud"; $("accStatus").textContent = "Sans compte : tes sessions restent sur cet appareil."; }
+  updateHomeSync();
 }
+let authMode = "in";
+$("authMode").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]"); if (!b) return;
+  authMode = b.dataset.mode;
+  $("authMode").querySelectorAll(".seg").forEach((s) => s.classList.toggle("on", s === b));
+  $("authSubmit").textContent = authMode === "up" ? "Créer mon compte" : "Se connecter";
+  $("loginPass").setAttribute("autocomplete", authMode === "up" ? "new-password" : "current-password");
+});
+$("guestBtn").addEventListener("click", () => { store.set("cs-guest", true); showView("home"); });
+$("toAuthBtn").addEventListener("click", () => showView("auth"));
 // E-mail + password: works without an e-mail sending service (Supabase "Confirm email" turned off).
 function authError(m = "") {
   if (/invalid login credentials/i.test(m)) return "E-mail ou mot de passe incorrect.";
@@ -769,23 +852,39 @@ function authError(m = "") {
   return "Connexion impossible : " + m;
 }
 $("loginForm").addEventListener("submit", async (e) => {
-  e.preventDefault(); if (!sb) return;
+  e.preventDefault();
+  if (!sb) { toast("Connexion indisponible pour le moment. Vérifie ta connexion internet."); return; }
   const email = $("loginEmail").value.trim(), password = $("loginPass").value;
   if (!email || password.length < 8) { toast("Entre ton e-mail et un mot de passe d'au moins 8 caractères."); return; }
-  const signup = e.submitter?.dataset.mode === "up";
-  const btns = $("loginForm").querySelectorAll("button"); btns.forEach((b) => (b.disabled = true));
+  const signup = authMode === "up";
+  $("authSubmit").disabled = true; $("authSubmit").textContent = signup ? "Création…" : "Connexion…";
   const { data, error } = signup ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
-  btns.forEach((b) => (b.disabled = false));
+  $("authSubmit").disabled = false; $("authSubmit").textContent = signup ? "Créer mon compte" : "Se connecter";
   if (error) { toast(authError(error.message)); return; }
   if (signup && !data.session) { toast(authError("email not confirmed")); return; }
-  $("loginPass").value = ""; toast(signup ? "Compte créé : tes sessions vont se synchroniser" : "Connecté : tes sessions vont se synchroniser");
+  user = data.session.user; store.set("cs-guest", false);
+  $("loginPass").value = ""; renderAccount(); showView("home");
+  toast(signup ? "Compte créé, bienvenue !" : "Connecté");
 });
 $("syncBtn").addEventListener("click", () => sync());
-$("logoutBtn").addEventListener("click", async () => { await sb.auth.signOut(); toast("Déconnecté. Tes sessions restent sur cet appareil."); });
+$("logoutBtn").addEventListener("click", async () => {
+  await sb.auth.signOut(); store.set("cs-guest", false);
+  showView("auth"); toast("Déconnecté. Tes sessions restent sur cet appareil.");
+});
+// First screen: the home page when signed in (or when the person chose to go on without an account), else sign-in.
+let routed = false;
+function route() {
+  if (routed) return; routed = true;
+  showView(user || store.get("cs-guest", false) ? "home" : "auth");
+  $("splash").hidden = true;
+}
+setTimeout(route, 2500); // never stay on the splash (no network, auth library missing…)
 if (sb) {
-  sb.auth.onAuthStateChange((_ev, session) => {
+  sb.auth.onAuthStateChange((ev, session) => {
     const was = user?.id; user = session?.user || null; renderAccount();
     if (user && user.id !== was) scheduleSync(200);
+    if (ev === "INITIAL_SESSION") route();
+    if (ev === "SIGNED_OUT" && view && view !== "auth") showView("auth");
   });
   window.addEventListener("online", () => scheduleSync(500));
   document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleSync(800); });
@@ -794,6 +893,7 @@ if (sb) {
 
 /* ================= boot ================= */
 bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount(); loadData();
+if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
   matchAll, matchManual, buildCsv, grab, detectText, recognize, readCodes, get DATA() { return DATA; },
