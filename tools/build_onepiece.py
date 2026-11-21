@@ -171,7 +171,7 @@ def main():
             for pid in (e[3] if isinstance(e[3], list) else [e[3]] if e[3] else []):
                 g = prices_raw.get(pid)
                 if g:
-                    prices[str(pid)] = [g.get("trend") or g.get("trend-foil"), g.get("low") or g.get("low-foil"), g.get("avg7") or g.get("avg7-foil")]
+                    prices[str(pid)] = [g.get("trend") or g.get("trend-foil"), g.get("low") or g.get("low-foil"), g.get("avg7") or g.get("avg7-foil"), g.get("avg1") or g.get("avg1-foil")]
 
     out = {"v": datetime.date.today().isoformat(), "img": IMG, "cards": cards, "sets": setnames, "prints": prints, "prices": prices}
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)

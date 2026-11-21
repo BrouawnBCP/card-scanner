@@ -74,3 +74,5 @@ select option{background:#0c0f22;color:var(--ink)}
 .fly:not(.gem) .code{color:#6fe3a6}
 .fly-stock{background:rgba(255,255,255,.1);color:#cfe6ff}
 .toast{background:rgba(10,13,30,.95);color:var(--ink);border:1px solid rgba(120,170,255,.32);box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 20px rgba(63,212,255,.18)}
+.fly-prices{margin-top:4px;font:600 12px var(--f-mono);color:#cfe6ff;white-space:nowrap}.fly-prices b{font-weight:700;color:#8fb4ff}
+.fly.gem .fly-prices{color:#2a1d02}.fly.gem .fly-prices b{color:#5a3d00}

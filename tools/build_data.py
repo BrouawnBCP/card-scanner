@@ -10,7 +10,7 @@ Output: one compact JSON file (default app/data/cards.json):
     "cards": [[nameEN, nameFR, ygoprodeckId], ...],
     "sets":  [setName, ...],
     "prints": {"MP20-167": [[cardIdx, setIdx, rarity, cmId, cmVersions], ...]},
-    "prices": {"cmId": [trend, low, avg7], ...}
+    "prices": {"cmId": [trend, low, avg7, avg1], ...}   (low = "De" on Cardmarket, avg1 = average sale price of the last day)
   }
 cmId is the Cardmarket product id, 0 when no product matched, or a list of
 candidate ids when Cardmarket lists several versions and none could be told apart
@@ -138,7 +138,7 @@ def main():
     prices = {}
     for g in prices_raw:
         if g["idProduct"] in used:
-            prices[str(g["idProduct"])] = [g.get("trend"), g.get("low"), g.get("avg7")]
+            prices[str(g["idProduct"])] = [g.get("trend"), g.get("low"), g.get("avg7"), g.get("avg1")]
 
     out = {"v": datetime.date.today().isoformat(), "cards": cards, "sets": setnames, "prints": prints, "prices": prices}
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)

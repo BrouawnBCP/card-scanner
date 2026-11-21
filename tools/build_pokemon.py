@@ -120,7 +120,7 @@ def main():
         for e in lst:
             g = prices_raw.get(e[3])
             if g:
-                prices[str(e[3])] = [g.get("trend") or g.get("trend-holo"), g.get("low") or g.get("low-holo"), g.get("avg7") or g.get("avg7-holo")]
+                prices[str(e[3])] = [g.get("trend") or g.get("trend-holo"), g.get("low") or g.get("low-holo"), g.get("avg7") or g.get("avg7-holo"), g.get("avg1") or g.get("avg1-holo")]
 
     out = {"v": datetime.date.today().isoformat(), "img": IMG, "cards": cards, "sets": setnames, "prints": prints, "prices": prices}
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)

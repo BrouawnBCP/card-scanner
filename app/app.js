@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "49";
+const APP_VERSION = "50";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -133,12 +133,22 @@ async function loadData() {
     setStatus("La base de cartes n'a pas pu être chargée. Vérifie ta connexion puis relance l'appli.");
   }
 }
+/** Cardmarket price guide row of a product: [trend, low ("De"), avg7, avg1] (avg1 missing in data built before v50). */
+const priceRow = (i) => DATA?.prices[i] ?? Object.values(EXTRA).reduce((v, D) => v ?? D?.prices[i], undefined);
+/** Price shown for a card: Cardmarket's 1-day average; the trend when no sale was recorded that day. */
+const shownPrice = (row) => (row ? row[3] ?? row[0] : null);
 function cmPrice(cm) {
   if (!DATA || !cm) return null;
   const ids = Array.isArray(cm) ? cm : [cm];
-  const t = ids.map((i) => DATA.prices[i]?.[0] ?? Object.values(EXTRA).reduce((v, D) => v ?? D?.prices[i]?.[0], undefined)).filter((x) => x != null);
+  const t = ids.map((i) => shownPrice(priceRow(i))).filter((x) => x != null);
   if (!t.length) return null;
   return { lo: Math.min(...t), hi: Math.max(...t) };
+}
+/** "De" on Cardmarket: the lowest price on offer, all languages. */
+function cmLow(cm) {
+  if (!DATA || !cm) return null;
+  const t = (Array.isArray(cm) ? cm : [cm]).map((i) => priceRow(i)?.[1]).filter((x) => x != null && x > 0);
+  return t.length ? Math.min(...t) : null;
 }
 const priceText = (p) => !p ? "" : p.lo === p.hi ? eur(p.lo) : `${eur(p.lo)} – ${eur(p.hi)}`;
 function candidatesFor(key, g = "ygo") {
@@ -917,14 +927,20 @@ function gemPrice(it) {
   const p = cmPrice(it.cm), t = Number(settings.gem) || 0;
   return t > 0 && p && p.hi >= t ? p : null;
 }
+/** "De 3,00 € · 1 jour 5,24 €" in the bubble shown when a card is added. */
+function flyPrices(it) {
+  const p = cmPrice(it.cm), low = cmLow(it.cm);
+  const parts = [low != null ? `<b>De</b> ${esc(eur(low))}` : "", p ? `<b>1 jour</b> ${esc(p.lo === p.hi ? eur(p.lo) : `${num(p.lo)}–${num(p.hi)} €`)}` : ""].filter(Boolean);
+  return parts.length ? `<span class="fly-prices">${parts.join(" · ")}</span>` : "";
+}
 function celebrate(it) {
   bump($("guide"), "hit");
   const gem = gemPrice(it);
   const fly = document.createElement("div");
   fly.className = gem ? "fly gem" : "fly";
   fly.innerHTML = gem
-    ? `<span class="gem-title">${ico("gem")} Pépite !</span><span>${esc(it.nameFR)}</span><span class="gem-price">${gem.lo === gem.hi ? esc(eur(gem.lo)) : `jusqu'à ${esc(eur(gem.hi))}`}</span>`
-    : `<span class="code">${esc(it.code)}</span><span>${esc(it.nameFR)}</span>`;
+    ? `<span class="gem-title">${ico("gem")} Pépite !</span><span>${esc(it.nameFR)}</span><span class="gem-price">${gem.lo === gem.hi ? esc(eur(gem.lo)) : `jusqu'à ${esc(eur(gem.hi))}`}</span>${cmLow(it.cm) != null ? `<span class="fly-prices"><b>De</b> ${esc(eur(cmLow(it.cm)))} · <b>1 jour</b> ${esc(gem.lo === gem.hi ? eur(gem.lo) : `${num(gem.lo)}–${num(gem.hi)} €`)}</span>` : ""}`
+    : `<span class="code">${esc(it.code)}</span><span>${esc(it.nameFR)}</span>${flyPrices(it)}`;
   const st = stockOf(it);
   if (st) fly.innerHTML += `<span class="fly-stock">Déjà ${st.n} en stock</span>`;
   $("stage").append(fly);
@@ -957,7 +973,10 @@ function beep() {
   } catch {}
 }
 /** " · 2,17 €" after the name of a card just added (shown on the camera, the card panel being lower on the page). */
-const addedPrice = (it) => { const p = cmPrice(it.cm); return p ? " · " + esc(p.lo === p.hi ? eur(p.lo) : `${num(p.lo)}–${num(p.hi)} €`) : ""; };
+const addedPrice = (it) => {
+  const p = cmPrice(it.cm), low = cmLow(it.cm);
+  return (low != null ? ` · De ${esc(eur(low))}` : "") + (p ? ` · 1 jour ${esc(p.lo === p.hi ? eur(p.lo) : `${num(p.lo)}–${num(p.hi)} €`)}` : "");
+};
 function setStatus(html) { $("status").innerHTML = html; }
 
 /* ================= photo scanning ================= */
@@ -1105,7 +1124,7 @@ const priceHtml = (it) => {
     }
     return `<span class="price own" title="Ton prix de vente">${arrow}${esc(eur(p.lo))}</span>`;
   }
-  return p.lo === p.hi ? `<span class="price" title="Cote tendance Cardmarket">${esc(eur(p.lo))}</span>` : `<span class="price range" title="Plusieurs versions possibles">${num(p.lo)}–${num(p.hi)} €</span>`;
+  return p.lo === p.hi ? `<span class="price" title="Prix moyen 1 jour Cardmarket">${esc(eur(p.lo))}</span>` : `<span class="price range" title="Plusieurs versions possibles">${num(p.lo)}–${num(p.hi)} €</span>`;
 };
 /** Line in the detail panel: Cardmarket trend next to the own price. */
 function marketLine(it) {
@@ -1118,7 +1137,8 @@ function marketLine(it) {
     const pct = Math.round(((p.lo - o) / o) * 100);
     diff = ` <span class="diff ${pct > 0 ? "up" : "down"}">${pct > 0 ? "▲ +" : "▼ "}${pct} %</span>`;
   }
-  return `<p class="full muted small market-line">Cote Cardmarket (tendance) : <strong>${esc(t)}</strong>${o != null ? ` · ton prix : <strong>${esc(eur(o))}</strong>${diff}` : ""}</p>`;
+  const low = cmLow(it.cm);
+  return `<p class="full muted small market-line">Cardmarket : ${low != null ? `De <strong>${esc(eur(low))}</strong> · ` : ""}1 jour <strong>${esc(t)}</strong>${o != null ? ` · ton prix : <strong>${esc(eur(o))}</strong>${diff}` : ""}</p>`;
 }
 const ico = (id) => `<svg class="ico"><use href="#i-${id}"/></svg>`;
 /** YGOPRODeck id of the item's card (its thumbnail is img/<id>.webp). */
@@ -1654,7 +1674,7 @@ function renderInsights(src = items, coll = false) {
         <div class="bar-track"><span style="width:${Math.max(3, (v / max) * 100).toFixed(1)}%"></span></div></div>`).join("")}
       ${rest ? `<div class="bar muted small">+ ${sets.length - 8} autres extensions : ${esc(eur(rest))}</div>` : ""}
     </div>
-    <p class="muted small">Calculé avec ton prix de vente quand il est renseigné, sinon la cote tendance Cardmarket de la version exacte.</p>`;
+    <p class="muted small">Calculé avec ton prix de vente quand il est renseigné, sinon le prix moyen 1 jour Cardmarket de la version exacte.</p>`;
 }
 
 /* ================= sessions UI ================= */
@@ -1712,7 +1732,7 @@ function buildCsv(list = listSource()) {
     if (!it.rarity) continue;
     const id = typeof it.cm === "number" ? it.cm : "";
     let price = it.price;
-    if (!price && settings.priceTrend && id) price = DATA?.prices[id]?.[0] ?? Object.values(EXTRA).reduce((v, D) => v ?? D?.prices[id]?.[0], undefined) ?? "";
+    if (!price && settings.priceTrend && id) price = shownPrice(priceRow(id)) ?? "";
     const k = [id || it.key, it.rarity, it.lang, it.firstEd, it.condition, price, it.comment].join("|");
     const r = rows.get(k);
     if (r) r.qty += it.qty; else rows.set(k, { it, id, price, qty: it.qty });

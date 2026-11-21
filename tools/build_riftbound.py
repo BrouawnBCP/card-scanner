@@ -163,7 +163,8 @@ def main():
                 t = (g.get("trend-foil") or g.get("trend")) if foil else g.get("trend")
                 low = (g.get("low-foil") or g.get("low")) if foil else g.get("low")
                 avg7 = (g.get("avg7-foil") or g.get("avg7")) if foil else g.get("avg7")
-                prices[str(pid)] = [t, low, avg7]
+                avg1 = (g.get("avg1-foil") or g.get("avg1")) if foil else g.get("avg1")
+                prices[str(pid)] = [t, low, avg7, avg1]
 
     # the sets' own totals (the number after the slash), from the regular collector numbers
     counts = collections.defaultdict(collections.Counter)
