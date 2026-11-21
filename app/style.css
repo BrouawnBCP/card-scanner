@@ -554,3 +554,4 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .list-games .seg{min-height:46px;flex-direction:column;gap:1px;padding:4px 2px}
 .list-games .seg[data-count]:not([data-count=""])::after{position:static;font:700 9px/1 var(--f-mono);color:var(--muted)}
 .list-games .seg.on[data-count]::after{color:var(--ink)}
+.export-dir{display:flex;align-items:center;gap:12px;justify-content:space-between}.export-dir>div{display:flex;flex-direction:column;gap:2px;min-width:0}

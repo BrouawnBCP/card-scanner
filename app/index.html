@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=57">
-<link rel="stylesheet" href="theme-galaxy.css?v=57">
+<link rel="stylesheet" href="style.css?v=59">
+<link rel="stylesheet" href="theme-galaxy.css?v=59">
 </head>
 <body>
 
@@ -378,6 +378,10 @@
       <label class="switch"><span>Prix de vente = prix moyen 1 jour</span><input type="checkbox" id="setPriceTrend"><i></i></label>
       <label class="switch"><span>Bip à chaque carte</span><input type="checkbox" id="setSound" checked><i></i></label>
       <label class="switch"><span>Mode diagnostic</span><input type="checkbox" id="setDebug"><i></i></label>
+      <div class="export-dir" id="exportDirRow" hidden>
+        <div><strong>Dossier des exports CSV</strong><span class="muted small" id="exportDirName">Pas encore choisi : il sera demandé au premier export.</span></div>
+        <button class="btn small" type="button" id="exportDirBtn">Choisir</button>
+      </div>
     </section>
 
     <button class="btn danger wide" id="clearBtn"><svg class="ico sm"><use href="#i-trash"/></svg> Supprimer cette session</button>
@@ -445,6 +449,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=57"></script>
+<script type="module" src="app.js?v=59"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "57";
+const APP_VERSION = "59";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1796,13 +1796,52 @@ $("exportBtn").addEventListener("click", async () => {
   const gname = games.size === 1 ? GAMES[[...games][0]].name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9]+/g, "-").toLowerCase() + "-" : "";
   const name = `cardmarket-${gname}${slug || "scan"}.csv`;
   const file = new File(["﻿" + csv], name, { type: "text/csv" });
+  // phone: share sheet (Save to Files, AirDrop…); computer: the folder chosen once, else a plain download
   try {
-    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+    if (isPhone && navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
   } catch (e) { if (e?.name === "AbortError") return; }
+  if (!isPhone && window.showDirectoryPicker) {
+    const r = await saveInExportDir(file, name);
+    if (r !== "fallback") return;
+  }
+  toast(`Fichier téléchargé : ${name}`);
   const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = name;
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
 });
 
+/* ----- computer: CSV exports go to a folder chosen once (Chrome / Edge), remembered on this computer ----- */
+const isPhone = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+async function pickExportDir() {
+  const dir = await window.showDirectoryPicker({ id: "card-scanner-csv", mode: "readwrite", startIn: "documents" });
+  await idb.set("exportDir", dir); renderExportDir();
+  return dir;
+}
+/** "ok", "cancel" (the person closed the folder chooser) or "fallback" (no folder possible: normal download). */
+async function saveInExportDir(file, name) {
+  try {
+    let dir = await idb.get("exportDir").catch(() => null);
+    if (!dir) { toast("Choisis le dossier où ranger tes exports CSV (une seule fois)."); dir = await pickExportDir(); }
+    let perm = await dir.queryPermission({ mode: "readwrite" });
+    if (perm !== "granted") perm = await dir.requestPermission({ mode: "readwrite" });
+    if (perm !== "granted") return "fallback";
+    const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+    await w.write(file); await w.close();
+    toast(`Enregistré dans « ${dir.name} » : ${name}`);
+    return "ok";
+  } catch (e) {
+    if (e?.name === "AbortError") return "cancel";
+    console.warn(e); return "fallback";
+  }
+}
+async function renderExportDir() {
+  const row = $("exportDirRow"); row.hidden = isPhone || !window.showDirectoryPicker;
+  if (row.hidden) return;
+  const dir = await idb.get("exportDir").catch(() => null);
+  $("exportDirName").textContent = dir ? `« ${dir.name} »` : "Pas encore choisi : il sera demandé au premier export.";
+  $("exportDirBtn").textContent = dir ? "Changer" : "Choisir";
+}
+$("exportDirBtn").addEventListener("click", async () => { try { const d = await pickExportDir(); toast(`Les exports iront dans « ${d.name} »`); } catch (e) { if (e?.name !== "AbortError") console.warn(e); } });
+renderExportDir();
 /* ================= settings & navigation ================= */
 function bindSettings() {
   $("setCond").value = settings.cond; $("setLang").value = settings.lang; $("setComment").value = settings.comment;
