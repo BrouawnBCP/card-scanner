@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "56";
+const APP_VERSION = "57";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1068,10 +1068,10 @@ const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_
 /** Vinted France search on the card's name (sellers rarely write the set code there). */
 /** One Piece: the card's language is added to the eBay and Vinted searches ("Français", "English"…). */
 const LANG_WORD = { French: "Français", English: "English", German: "Deutsch", Italian: "Italiano", Spanish: "Español", Portuguese: "Português" };
-/** Vinted: name + printed code ("Galant Granite MP20-FR167"); One Piece adds the language; Riftbound: name only. */
+/** Vinted: name + printed code ("Galant Granite MP20-FR167", "Kumacy OP14-102"); Riftbound: name only. */
 const vintedLink = (it) => {
   const g = gameOf(it), name = String(it.nameFR || it.nameEN || "").replace(/^"+|"+$/g, "");
-  const q = [name, g !== "rb" ? it.code : "", g === "op" ? LANG_WORD[it.lang] : ""].filter(Boolean).join(" ");
+  const q = [name, g !== "rb" ? it.code : ""].filter(Boolean).join(" ");
   return `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(q)}`;
 };
 // Cardmarket language ids (offer filter "language=").
