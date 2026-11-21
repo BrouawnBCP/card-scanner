@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "50";
+const APP_VERSION = "52";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -102,7 +102,7 @@ const GAMES = {
   rb: { name: "Riftbound", cm: "Riftbound", file: "riftbound.json", lang: "English", img: (u) => `${u}?w=160&fm=webp&accountingTag=RB` },
   op: { name: "One Piece", cm: "OnePiece", file: "onepiece.json", img: (u) => u },
   // Pokémon: big database (4 MB), loaded only when the game is used
-  pk: { name: "Pokémon", cm: "Pokemon", file: "pokemon.json", lazy: true, img: (u) => `${u}/low.webp` },
+  pk: { name: "Pokémon", cm: "Pokemon", file: "pokemon.json", lazy: true, img: (u) => `${u}/low.jpg` },
 };
 const GAME_NAME = Object.fromEntries(Object.entries(GAMES).map(([k, v]) => [k, v.name]));
 const EXTRA = {}; // game -> loaded database
@@ -1060,13 +1060,20 @@ function setRarity(it, rarity) {
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
 /** eBay France search on the printed set code (MP20-FR167): finds that exact print and language. */
-const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""}` : gameOf(it) === "pk" ? `Pokemon ${it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "")}`;
+const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""} ${LANG_WORD[it.lang] || ""}`.trim() : gameOf(it) === "pk" ? `Pokemon ${(it.lang === "English" ? it.nameEN : it.nameFR) || it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "")}`;
 /** Cardmarket and eBay logo buttons. */
 const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
   + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`
   + `<a class="brand-btn vinted" href="${vintedLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.nameFR || it.nameEN)} sur Vinted" title="Rechercher sur Vinted"><img src="icons/brands/vinted.png" alt="" width="24" height="24"></a>`;
 /** Vinted France search on the card's name (sellers rarely write the set code there). */
-const vintedLink = (it) => `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(String(it.nameFR || it.nameEN || "").replace(/^"+|"+$/g, ""))}`;
+/** One Piece: the card's language is added to the eBay and Vinted searches ("Français", "English"…). */
+const LANG_WORD = { French: "Français", English: "English", German: "Deutsch", Italian: "Italiano", Spanish: "Español", Portuguese: "Português" };
+/** Vinted: name + printed code ("Galant Granite MP20-FR167"); One Piece adds the language; Riftbound: name only. */
+const vintedLink = (it) => {
+  const g = gameOf(it), name = String(it.nameFR || it.nameEN || "").replace(/^"+|"+$/g, "");
+  const q = [name, g !== "rb" ? it.code : "", g === "op" ? LANG_WORD[it.lang] : ""].filter(Boolean).join(" ");
+  return `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(q)}`;
+};
 // Cardmarket language ids (offer filter "language=").
 const CM_LANG = { English: 1, French: 2, German: 3, Spanish: 4, Italian: 5, Portuguese: 8 };
 /** Product page with offers filtered on the card's language; a name search when the exact product is unknown.
@@ -1154,7 +1161,7 @@ function cardImgId(it) {
 const itemPhoto = (it) => { if (!it.photos?.length || !photoCache) return null; for (const id of it.photos) { const p = photoCache.find((x) => x.id === id); if (p) return p; } return null; };
 /** Riftbound picture of the item's card (resized by the image server). */
 function rbImg(it) {
-  const g = gameOf(it), D = dataFor(g); if (!D) return "";
+  const g = gameOf(it), D = dataFor(g); if (!D) { ensureGame(g); return ""; } // e.g. Pokémon cards synced from another device
   let c = D.cards[it.card];
   if (!c || c[0] !== it.nameEN) { const e = (D.prints[it.key] || []).find((x) => D.cards[x[0]][0] === it.nameEN) || (D.prints[it.key] || [])[0]; c = e && D.cards[e[0]]; }
   return c && c[2] ? GAMES[g].img(D.img + c[2]) : "";
