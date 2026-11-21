@@ -68,6 +68,16 @@ def main():
 
     # Japanese / Asian editions on Cardmarket: their sealed products are marked as such
     asian = {p["idExpansion"] for p in sealed if re.search(r"Non-English|Asia Region|Japanese", p["name"], re.I)}
+    # expansion names (not in the singles list): the shortest sealed product name, without "Booster…"; no sealed product: promos
+    exp_names = collections.defaultdict(list)
+    for p in sealed:
+        exp_names[p["idExpansion"]].append(p["name"])
+    def exp_name(x):
+        names = [n for n in exp_names.get(x, []) if re.search(r"Booster|Starter Deck|Premium|Extra", n)]
+        if not names:  # promo expansions hold all sorts of event packs: call them "Promos"
+            return "Promos"
+        n = min(names, key=len)
+        return re.sub(r"\s*(-\s*)?(Booster( Box)?( Case)?|Display|Sleeved Booster)\b.*$", "", n).strip() or n
     cm = collections.defaultdict(lambda: collections.defaultdict(list))   # code -> expansion -> [product]
     exp_prefix = collections.defaultdict(collections.Counter)
     cm_name = {}
@@ -98,7 +108,9 @@ def main():
 
     for code in sorted(set(by_code) | set(cm)):
         prefix = code.split("-")[0]
-        es = by_code.get(code, [])
+        # promo codes (P-xxx) are reprinted in many products the card list does not tell apart:
+        # offer the Cardmarket products themselves, named after their expansion
+        es = [] if prefix == "P" else by_code.get(code, [])
         # main set first (the one named after the code), then reprints / special sets
         es.sort(key=lambda e: (re.sub(r"[^A-Z0-9]", "", e["set_id"].upper()) != prefix, variant(e)[0]))
         exps = cm.get(code, {})
@@ -108,7 +120,7 @@ def main():
         main_es = [e for e in es if re.sub(r"[^A-Z0-9]", "", e["set_id"].upper()) == prefix] or es[:len(main_ps)]
         other_es = [e for e in es if e not in main_es]
         lst = []
-        def put(e, cmid, n):
+        def put(e, cmid, n, setname=None, label=None):
             nonlocal linked, ambiguous
             name = clean_name(e["card_name"]) if e else cm_name.get(code, code)
             img = (e.get("card_image") or "") if e else ""
@@ -118,8 +130,8 @@ def main():
                 card_idx[ck] = len(cards); cards.append([name, "", img])
             rarity = (e.get("rarity") or "") if e else ""
             lab = variant(e)[1] if e else ""
-            rar = (f"{rarity} {lab}".strip() if rarity else lab) or "Carte"
-            si = add_set(e["set_name"] if e else prefix)
+            rar = label or (f"{rarity} {lab}".strip() if rarity else lab) or "Carte"
+            si = add_set(setname or (e["set_name"] if e else prefix))
             if isinstance(cmid, list): ambiguous += 1
             elif cmid: linked += 1
             lst.append([card_idx[ck], si, rar, cmid, n])
@@ -134,12 +146,22 @@ def main():
                         put(e, [p["idProduct"] for p in group_ps][:8], len(group_ps))
                     else:
                         put(e, 0, 0)
-        else:  # promos and cards missing from optcgapi: Cardmarket alone (name, no picture)
+        else:  # promos and cards missing from optcgapi: Cardmarket alone (name, no picture), named after their expansion
             for i, p in enumerate(main_ps + other_ps):
-                put(None, p["idProduct"], 1)
-            if lst:
-                for k, e in enumerate(lst):
-                    e[2] = "Carte" if len(lst) == 1 else f"Version {k + 1}"
+                put(None, p["idProduct"], 1, exp_name(p["idExpansion"]), f"Version · {exp_name(p['idExpansion'])}")
+        # versions sold on Cardmarket that the card list does not know (e.g. the same code in "Promos"): offered too
+        used = {i for e in lst for i in (e[3] if isinstance(e[3], list) else [e[3]])}
+        for x, ps in exps.items():
+            for p in ps:
+                if p["idProduct"] not in used:
+                    put(None, p["idProduct"], 1, exp_name(x), f"Autre version · {exp_name(x)}")
+        # the app tells versions apart by their label: number the ones that share a label
+        seen_lab = collections.Counter(e[2] for e in lst)
+        nth = collections.Counter()
+        for e in lst:
+            if seen_lab[e[2]] > 1:
+                nth[e[2]] += 1
+                e[2] = f"{e[2]} n°{nth[e[2]]}"
         if lst:
             prints[code] = lst
 

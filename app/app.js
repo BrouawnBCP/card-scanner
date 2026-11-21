@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "48";
+const APP_VERSION = "49";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1050,9 +1050,13 @@ const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_
 const vintedLink = (it) => `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(String(it.nameFR || it.nameEN || "").replace(/^"+|"+$/g, ""))}`;
 // Cardmarket language ids (offer filter "language=").
 const CM_LANG = { English: 1, French: 2, German: 3, Spanish: 4, Italian: 5, Portuguese: 8 };
-/** Product page with offers filtered on the card's language; a name search when the exact product is unknown. */
+/** Product page with offers filtered on the card's language; a name search when the exact product is unknown.
+    One Piece codes sold in several expansions (e.g. Sabo P-105 in "Promos" and in "Adventure on Kami's Island"):
+    a search on name + code ("Sabo P-105"), which lists every version whatever its expansion. */
 const cmLink = (it) => {
-  const lang = CM_LANG[it.lang] || 2, g = GAMES[gameOf(it)].cm;
+  const lang = CM_LANG[it.lang] || 2, gm = gameOf(it), g = GAMES[gm].cm;
+  if (gm === "op" && (dataFor("op")?.prints[it.key] || []).length > 1)
+    return `https://www.cardmarket.com/fr/${g}/Products/Search?searchString=${encodeURIComponent(`${it.nameEN || ""} ${it.code || ""}`.trim())}&language=${lang}`;
   return typeof it.cm === "number" && it.cm
     ? `https://www.cardmarket.com/fr/${g}/Products?idProduct=${it.cm}&language=${lang}`
     : `https://www.cardmarket.com/fr/${g}/Products/Search?searchString=${encodeURIComponent(it.nameEN || "")}&language=${lang}`;
@@ -1075,6 +1079,7 @@ function rarBadge(r) {
   if (!r) return `<span class="rar r-q" title="Rareté à choisir">?</span>`;
   // One Piece: "SEC", "L Parallèle", "SEC Manga"… → base rarity, plus a mark for special versions
   const OPR = { L: "r-ur", C: "r-c", UC: "r-c", R: "r-r", SR: "r-sr", SEC: "r-scr", PR: "r-c", TR: "r-gold", SP: "r-gold" }, w0 = r.split(" ")[0];
+  if (/^(Version|Autre version) ·/.test(r)) return `<span class="rar r-c" title="${esc(r)}">PR</span>`; // One Piece promo versions
   if (OPR[w0] && !RAR[r]) {
     const v = r === w0 ? "" : /Manga/.test(r) ? "M" : / SP/.test(r) ? "SP" : /Réimpression/.test(r) ? "R" : "★";
     return `<span class="rar ${OPR[w0]}" title="${esc(r)}">${esc(w0 + v)}</span>`;
