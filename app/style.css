@@ -549,3 +549,8 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .list-games .seg[data-count]:not([data-count=""])::after{content:attr(data-count);position:absolute;top:1px;right:4px;font:700 9px var(--f-mono);color:var(--muted)}
 .list-games .seg:not(.on) .game-ico{opacity:.6;filter:saturate(.6)}
 #view-list.hist .list-games{display:none}
+.session-switch{align-self:flex-start;margin-top:-4px}
+/* game counts: under the logo, never on it */
+.list-games .seg{min-height:46px;flex-direction:column;gap:1px;padding:4px 2px}
+.list-games .seg[data-count]:not([data-count=""])::after{position:static;font:700 9px/1 var(--f-mono);color:var(--muted)}
+.list-games .seg.on[data-count]::after{color:var(--ink)}

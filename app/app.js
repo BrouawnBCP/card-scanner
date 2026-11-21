@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "54";
+const APP_VERSION = "55";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1309,7 +1309,7 @@ function renderListGames() {
   for (const it of all) n[gameOf(it)] = (n[gameOf(it)] || 0) + it.qty;
   $("listGames").querySelectorAll("[data-lgame]").forEach((b) => {
     const g = b.dataset.lgame; b.classList.toggle("on", g === listGame);
-    b.dataset.count = g === "all" ? "" : n[g] || "";
+    const c = n[g] || 0; b.dataset.count = g === "all" || !c ? "" : c >= 10000 ? Math.floor(c / 1000) + "k" : c >= 1000 ? (c / 1000).toFixed(1).replace(".", ",") + "k" : String(c);
     b.classList.toggle("empty", g !== "all" && !n[g]);
   });
   $("listGames").hidden = listMode === "history";
@@ -1363,7 +1363,7 @@ function renderList() {
   $("sessionTitle").closest(".title-box").hidden = coll; $("collTitle").hidden = !coll;
   $("selectBtn").querySelector("span").textContent = selecting ? "Terminer" : "Sélectionner";
   if (!coll && document.activeElement !== $("sessionTitle")) { $("sessionTitle").value = current.name; growTitle(); }
-  $("sessionDates").hidden = coll;
+  $("sessionDates").hidden = coll; $("switchSessionBtn").hidden = coll;
   if (!coll) {
     const fmt = (t, o) => new Date(t).toLocaleString("fr-FR", o);
     const lastScan = items.reduce((m, x) => Math.max(m, x.createdAt || 0), 0);
@@ -1748,6 +1748,7 @@ function renderSessions() {
 }
 function openSheet() { delArmed = null; renderSessions(); $("sheet").hidden = false; }
 $("sessionBar").addEventListener("click", (e) => { if (!e.target.closest("#newSessionBtn")) openSheet(); });
+$("switchSessionBtn").addEventListener("click", openSheet); // same session list, from the List page
 $("newSessionBtn").addEventListener("click", startNewSession);
 $("sheetNew").addEventListener("click", () => { startNewSession(); $("sheet").hidden = true; });
 $("sheetClose").addEventListener("click", () => ($("sheet").hidden = true));
