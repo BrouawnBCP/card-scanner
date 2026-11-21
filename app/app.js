@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "55";
+const APP_VERSION = "56";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1289,7 +1289,9 @@ $("stockClear").addEventListener("click", () => { STOCK = null; try { localStora
 const stockTag = (it) => { const s = stockOf(it); return s ? `<span class="tag stock" title="Déjà dans ton stock Cardmarket">stock ${s.n}</span>` : ""; };
 
 /* ----- "Ma collection": every session merged, one line per card version and language ----- */
-const colKey = (it) => [gameOf(it), typeof it.cm === "number" && it.cm ? it.cm : it.key, it.rarity, it.lang, it.firstEd].join("|");
+// A card with its own price (imported from a Cardmarket CSV, or typed in) stays on its own line, with that price;
+// scanned copies (no price of their own) are grouped apart and show the Cardmarket price.
+const colKey = (it) => [gameOf(it), typeof it.cm === "number" && it.cm ? it.cm : it.key, it.rarity, it.lang, it.firstEd, ownPrice(it) ?? ""].join("|");
 function collection() {
   const map = new Map();
   for (const s of sessions) for (const it of s.items) {
