@@ -87,7 +87,7 @@ def main():
             continue
         serie, setname, fn = p.split("/")
         st = sets.get((serie, setname))
-        if not st or not st["id"]:
+        if not st or not st["id"] or "Pocket" in serie:  # Pokémon TCG Pocket: digital cards only
             continue
         local = fn[:-3]
         names = lang_block(s, "name")
@@ -103,7 +103,7 @@ def main():
         sn = st["name"].get("fr") or st["name"].get("en") or st["id"]
         if sn not in set_idx:
             set_idx[sn] = len(setnames); setnames.append(sn)
-        entry = [card_idx[ck], set_idx[sn], RARITY_FR.get(rarity, rarity), cm, 1]
+        entry = [card_idx[ck], set_idx[sn], RARITY_FR.get(rarity, rarity) or "Carte", cm, 1]
         digits = re.sub(r"^0+(?=\d)", "", local)
         if re.fullmatch(r"\d+", local):
             for ab in st["abbr"]:                                  # "PBL FR 071/084" -> PBL-071

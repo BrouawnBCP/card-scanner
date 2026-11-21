@@ -120,10 +120,10 @@ def main():
         main_es = [e for e in es if re.sub(r"[^A-Z0-9]", "", e["set_id"].upper()) == prefix] or es[:len(main_ps)]
         other_es = [e for e in es if e not in main_es]
         lst = []
-        def put(e, cmid, n, setname=None, label=None):
+        def put(e, cmid, n, setname=None, label=None, picture=None):
             nonlocal linked, ambiguous
             name = clean_name(e["card_name"]) if e else cm_name.get(code, code)
-            img = (e.get("card_image") or "") if e else ""
+            img = (e.get("card_image") or "") if e else (picture or "")
             img = img[len(IMG):] if img.startswith(IMG) else ""
             ck = (name, img)
             if ck not in card_idx:
@@ -147,8 +147,15 @@ def main():
                     else:
                         put(e, 0, 0)
         else:  # promos and cards missing from optcgapi: Cardmarket alone (name, no picture), named after their expansion
+            # a picture from the card list when it has one for this code: the one of the same expansion, else the first
+            pics = [e for e in by_code.get(code, []) if e.get("card_image")]
+            def pic_for(x):
+                n = re.sub(r"[^a-z0-9]", "", exp_name(x).lower())
+                hit = next((e for e in pics if re.sub(r"[^a-z0-9]", "", (e.get("set_name") or "").lower()) == n), None)
+                base = next((e for e in pics if "_" not in (e.get("card_image_id") or "_")), None)  # plain version first
+                return (hit or base or (pics[0] if pics else {})).get("card_image")
             for i, p in enumerate(main_ps + other_ps):
-                put(None, p["idProduct"], 1, exp_name(p["idExpansion"]), f"Version · {exp_name(p['idExpansion'])}")
+                put(None, p["idProduct"], 1, exp_name(p["idExpansion"]), f"Version · {exp_name(p['idExpansion'])}", pic_for(p["idExpansion"]))
         # versions sold on Cardmarket that the card list does not know (e.g. the same code in "Promos"): offered too
         used = {i for e in lst for i in (e[3] if isinstance(e[3], list) else [e[3]])}
         for x, ps in exps.items():

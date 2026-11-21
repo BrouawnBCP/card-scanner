@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "52";
+const APP_VERSION = "53";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1101,6 +1101,16 @@ const RAR = {
   // Riftbound
   "Uncommon": ["U", "r-c"], "Epic": ["E", "r-ur"], "Showcase": ["SH", "r-gold"],
 };
+/** Pokémon rarities (TCGdex names): short label and badge colour. */
+const PKR = {
+  "Commune": ["C", "r-c"], "Peu commune": ["UC", "r-c"], "Rare": ["R", "r-r"], "Holo Rare": ["RH", "r-sr"], "Rare Holo": ["RH", "r-sr"],
+  "Holo Rare V": ["V", "r-sr"], "Holo Rare VMAX": ["VMAX", "r-ur"], "Holo Rare VSTAR": ["VSTAR", "r-ur"], "Rare Holo LV.X": ["LV.X", "r-ur"],
+  "Double rare": ["RR", "r-ur"], "Ultra Rare": ["UR", "r-ur"], "Illustration rare": ["IR", "r-scr"], "Special illustration rare": ["SIR", "r-scr"],
+  "Hyper rare": ["HR", "r-gold"], "Secret Rare": ["SR", "r-scr"], "Shiny rare": ["SH", "r-sr"], "Shiny rare V": ["SHV", "r-sr"], "Shiny rare VMAX": ["SHVM", "r-ur"],
+  "Shiny Ultra Rare": ["SUR", "r-gold"], "ACE SPEC Rare": ["ACE", "r-gold"], "Rare PRIME": ["PRIME", "r-ur"], "Pikachu Rare": ["PIKA", "r-gold"],
+  "LEGEND": ["LEG", "r-gold"], "Classic Collection": ["CC", "r-gold"], "Radiant Rare": ["RAD", "r-ur"], "Amazing Rare": ["AR", "r-scr"],
+  "Mega Attack Rare": ["MAR", "r-ur"], "Mega Hyper Rare": ["MHR", "r-gold"], "Promo": ["PR", "r-c"], "Carte": ["—", "r-c"],
+};
 function rarBadge(r) {
   if (!r) return `<span class="rar r-q" title="Rareté à choisir">?</span>`;
   // One Piece: "SEC", "L Parallèle", "SEC Manga"… → base rarity, plus a mark for special versions
@@ -1110,6 +1120,7 @@ function rarBadge(r) {
     const v = r === w0 ? "" : /Manga/.test(r) ? "M" : / SP/.test(r) ? "SP" : /Réimpression/.test(r) ? "R" : "★";
     return `<span class="rar ${OPR[w0]}" title="${esc(r)}">${esc(w0 + v)}</span>`;
   }
+  if (!RAR[r] && PKR[r]) return `<span class="rar ${PKR[r][1]}" title="${esc(r)}">${esc(PKR[r][0])}</span>`; // Pokémon (Yu-Gi-Oh names first: "Rare", "Ultra Rare"…)
   const [s, cls] = RAR[r] || [r.split(/\s+/).map((w) => w[0]).join("").slice(0, 4), "r-c"];
   return `<span class="rar ${cls}" title="${esc(r)}">${esc(s)}</span>`;
 }
@@ -1162,8 +1173,13 @@ const itemPhoto = (it) => { if (!it.photos?.length || !photoCache) return null; 
 /** Riftbound picture of the item's card (resized by the image server). */
 function rbImg(it) {
   const g = gameOf(it), D = dataFor(g); if (!D) { ensureGame(g); return ""; } // e.g. Pokémon cards synced from another device
-  let c = D.cards[it.card];
-  if (!c || c[0] !== it.nameEN) { const e = (D.prints[it.key] || []).find((x) => D.cards[x[0]][0] === it.nameEN) || (D.prints[it.key] || [])[0]; c = e && D.cards[e[0]]; }
+  // the database is rebuilt every night and its card numbers can move: trust the stored number only when that
+  // card is still one of this code's versions, else take the version of the same name and rarity (then name, then first)
+  const list = D.prints[it.key] || [];
+  const e = list.find((x) => x[0] === it.card && D.cards[x[0]][0] === it.nameEN)
+    || list.find((x) => D.cards[x[0]][0] === it.nameEN && x[2] === it.rarity && D.cards[x[0]][2])
+    || list.find((x) => D.cards[x[0]][0] === it.nameEN && D.cards[x[0]][2]) || list.find((x) => D.cards[x[0]][2]);
+  const c = e && D.cards[e[0]];
   return c && c[2] ? GAMES[g].img(D.img + c[2]) : "";
 }
 const thumb = (it, big = false) => {
