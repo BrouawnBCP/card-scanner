@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "53";
+const APP_VERSION = "54";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -1301,7 +1301,24 @@ function collection() {
   }
   return [...map.values()];
 }
-const listSource = () => (listMode === "collection" ? collection() : items);
+/* ----- one game at a time in the lists (logos above the list): the numbers and the CSV export follow it ----- */
+let listGame = GAMES[settings.listGame] ? settings.listGame : "all";
+const listSource = () => { const src = listMode === "collection" ? collection() : items; return listGame === "all" ? src : src.filter((it) => gameOf(it) === listGame); };
+function renderListGames() {
+  const all = listMode === "collection" ? collection() : items, n = {};
+  for (const it of all) n[gameOf(it)] = (n[gameOf(it)] || 0) + it.qty;
+  $("listGames").querySelectorAll("[data-lgame]").forEach((b) => {
+    const g = b.dataset.lgame; b.classList.toggle("on", g === listGame);
+    b.dataset.count = g === "all" ? "" : n[g] || "";
+    b.classList.toggle("empty", g !== "all" && !n[g]);
+  });
+  $("listGames").hidden = listMode === "history";
+}
+$("listGames").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-lgame]"); if (!b || b.dataset.lgame === listGame) return;
+  listGame = b.dataset.lgame; settings.listGame = listGame; store.set("cs-settings", settings);
+  selected.clear(); showMax = PAGE; renderList();
+});
 
 function visibleItems(list) {
   const q = fold(query);
@@ -1334,6 +1351,7 @@ function renderList() {
   $("view-list").classList.toggle("hist", hist); $("history").hidden = !hist;
   if (hist) { selecting = false; renderBulkBar(); renderHistory(); return; }
   const coll = listMode === "collection";
+  renderListGames();
   const src = listSource();
   const total = src.reduce((n, x) => n + x.qty, 0);
   let value = 0, priced = 0;
@@ -1766,10 +1784,14 @@ function buildCsv(list = listSource()) {
   return { csv: lines.join("\r\n") + "\r\n", count: rows.size };
 }
 $("exportBtn").addEventListener("click", async () => {
+  // a Cardmarket export holds one game: with "Tous" and several games in the list, ask which one
+  const games = new Set(listSource().map(gameOf));
+  if (games.size > 1) { toast("Cette liste mélange plusieurs jeux : choisis un jeu avec les logos en haut, puis exporte."); bump($("listGames")); return; }
   const { csv, count } = buildCsv();
   if (!count) { toast("Rien à exporter (choisis la rareté des cartes en orange)."); return; }
   const slug = (listMode === "collection" ? "ma collection" : current.name).normalize("NFD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
-  const name = `cardmarket-${slug || "scan"}.csv`;
+  const gname = games.size === 1 ? GAMES[[...games][0]].name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9]+/g, "-").toLowerCase() + "-" : "";
+  const name = `cardmarket-${gname}${slug || "scan"}.csv`;
   const file = new File(["﻿" + csv], name, { type: "text/csv" });
   try {
     if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }

@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=53">
-<link rel="stylesheet" href="theme-galaxy.css?v=53">
+<link rel="stylesheet" href="style.css?v=54">
+<link rel="stylesheet" href="theme-galaxy.css?v=54">
 </head>
 <body>
 
@@ -215,6 +215,13 @@
       <button class="seg" data-mode="history">Historique</button>
       <button class="seg" data-mode="collection">Collection</button>
     </div>
+    <div class="segmented list-games" id="listGames" role="tablist" aria-label="Jeu affiché">
+      <button class="seg on" data-lgame="all" type="button">Tous</button>
+      <button class="seg" data-lgame="ygo" type="button" aria-label="Yu-Gi-Oh" title="Yu-Gi-Oh"><span class="game-ico ygo" aria-hidden="true"><img src="icons/games/yugioh.png" alt="" width="30" height="30"></span></button>
+        <button class="seg" data-lgame="rb" type="button" aria-label="Riftbound" title="Riftbound"><img class="game-ico" src="icons/games/riftbound.svg" alt="" width="24" height="24"></button>
+        <button class="seg" data-lgame="op" type="button" aria-label="One Piece" title="One Piece"><img class="game-ico op" src="icons/games/onepiece.png" alt="" width="24" height="24"></button>
+        <button class="seg" data-lgame="pk" type="button" aria-label="Pokémon" title="Pokémon"><svg class="game-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="#fff" stroke="#1b1b1b" stroke-width="1.5"/><path d="M1.5 12a10.5 10.5 0 0 1 21 0z" fill="#e3350d" stroke="#1b1b1b" stroke-width="1.5"/><path d="M1.5 12h21" stroke="#1b1b1b" stroke-width="2"/><circle cx="12" cy="12" r="3.2" fill="#fff" stroke="#1b1b1b" stroke-width="1.8"/></svg></button>
+    </div>
     <header class="list-head" id="listHead">
       <div class="title-box">
         <textarea id="sessionTitle" class="title-input" aria-label="Nom de la session" maxlength="60" rows="1" spellcheck="false"></textarea>
@@ -249,12 +256,6 @@
           <option value="todo">À vérifier</option>
           <option value="gem">Pépites</option>
           <option value="photo">Avec photo</option>
-          <optgroup label="Jeu">
-            <option value="game:ygo">Yu-Gi-Oh</option>
-            <option value="game:rb">Riftbound</option>
-            <option value="game:op">One Piece</option>
-            <option value="game:pk">Pokémon</option>
-          </optgroup>
           <optgroup label="Stock Cardmarket">
             <option value="instock">Déjà en stock</option>
             <option value="notstock">Pas en stock</option>
@@ -443,6 +444,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=53"></script>
+<script type="module" src="app.js?v=54"></script>
 </body>
 </html>
