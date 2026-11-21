@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "59";
+const APP_VERSION = "60";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -378,9 +378,11 @@ function grab(src, x, y, w, h, max = 960) {
   return c;
 }
 /** Text detection (DBNet): boxes of text in canvas `c`, in its pixel coordinates. */
-async function detectText(c) {
+async function detectText(c, maxSide = 0) {
   const { det } = await getEngine();
-  const W = Math.max(32, Math.round(c.width / 32) * 32), H = Math.max(32, Math.round(c.height / 32) * 32);
+  // finding text lines works on a smaller copy (much faster); the letters are then read on the full picture
+  const ds = maxSide ? Math.min(1, maxSide / Math.max(c.width, c.height)) : 1;
+  const W = Math.max(32, Math.round((c.width * ds) / 32) * 32), H = Math.max(32, Math.round((c.height * ds) / 32) * 32);
   const t = document.createElement("canvas"); t.width = W; t.height = H;
   const g = t.getContext("2d", { willReadFrequently: true }); g.drawImage(c, 0, 0, W, H);
   const d = g.getImageData(0, 0, W, H).data, n = W * H, f = new Float32Array(3 * n);
@@ -431,11 +433,14 @@ async function recognize(c, b) {
   return s;
 }
 /** All set codes found in canvas `c` (detection + recognition of every likely line). */
-async function readCodes(c, { textH = 0, maxLines = 8, prefer = null, match = matchAll } = {}) {
-  const raw = (await detectText(c)).filter((b) => b.w > b.h * 2);
+async function readCodes(c, { textH = 0, maxLines = 8, prefer = null, match = matchAll, detMax = 0 } = {}) {
+  const raw = (await detectText(c, detMax)).filter((b) => b.w > b.h * 2);
   // detected boxes are padded ("unclip"): about 2.5× the height of the letters
   let boxes = textH ? raw.filter((b) => b.h > textH * 0.6 && b.h < textH * 4.5) : raw;
   if (prefer) boxes.sort((a, b) => prefer(a) - prefer(b));
+  // reading a line costs time in proportion to its length: the set code is always a short line, so the long
+  // lines (effect text, w > 16 × h) are read last, only if nothing else matched
+  boxes = [...boxes.filter((b) => b.w <= b.h * 16), ...boxes.filter((b) => b.w > b.h * 16)];
   const lines = [];
   for (const b of boxes.slice(0, maxLines)) {
     const text = await recognize(c, b);
@@ -702,7 +707,7 @@ async function scanFrame() {
     return Math.min(normal, pendulum) + wide;
   };
   const token = loopToken;
-  const res = await readCodes(zone, { textH, prefer, maxLines: 7 });
+  const res = await readCodes(zone, { textH, prefer, maxLines: 5 });
   if (!scanning || token !== loopToken) return;
   // Pendulum cards print the code small, bottom left: every other failed frame, read that corner at full resolution.
   if (!res.matches.some((x) => !x.unsure) && (pendTick++ % 2 === 0)) {
@@ -749,7 +754,7 @@ async function scanRiftbound(r, sig) {
   // short lines on the left first; long lines are effect text
   const prefer = (b) => (b.w / zone.width > 0.8 ? 1 : 0) + (b.x / zone.width > 0.35 ? 0.6 : 0) - ((b.y + b.h) / zone.height) * 0.2;
   const token = loopToken;
-  const res = await readCodes(zone, { prefer, maxLines: 5, match: matchRiftbound });
+  const res = await readCodes(zone, { prefer, maxLines: 4, match: matchRiftbound });
   if (!scanning || token !== loopToken) return;
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
@@ -781,7 +786,7 @@ async function scanOnePiece(r, sig) {
   const zone = grab(video, zx, zy, zw, zh, 1280);
   const prefer = (b) => (b.w / zone.width > 0.7 ? 1 : 0) + ((b.x + b.w) / zone.width < 0.6 ? 0.5 : 0) - ((b.y + b.h) / zone.height) * 0.3;
   const token = loopToken;
-  const res = await readCodes(zone, { prefer, maxLines: 5, match: matchOnePiece });
+  const res = await readCodes(zone, { prefer, maxLines: 4, match: matchOnePiece });
   if (!scanning || token !== loopToken) return;
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
@@ -815,7 +820,7 @@ async function scanPokemon(r, sig) {
   // the number is a short line: short lines first, effect text (long lines) last
   const prefer = (b) => (b.w / zone.width > 0.4 ? 1 : 0) - ((b.y + b.h) / zone.height) * 0.3;
   const token = loopToken;
-  const res = await readCodes(zone, { prefer, maxLines: 7, match: matchPokemon });
+  const res = await readCodes(zone, { prefer, maxLines: 5, match: matchPokemon });
   if (!scanning || token !== loopToken) return;
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches[0] || null;
