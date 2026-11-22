@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=60">
-<link rel="stylesheet" href="theme-galaxy.css?v=60">
+<link rel="stylesheet" href="style.css?v=61">
+<link rel="stylesheet" href="theme-galaxy.css?v=61">
 </head>
 <body>
 
@@ -183,6 +183,15 @@
       <div class="snap" id="snap" aria-hidden="true"></div>
       <div class="scan-hint" id="scanHint" role="status" aria-live="polite" hidden></div>
       <div class="vpick" id="pick" hidden></div>
+      <div class="debug" id="debug" hidden>
+        <div class="muted small">Diagnostic : ce que lit le scanner</div>
+        <canvas id="debugCanvas"></canvas>
+        <pre id="debugText"></pre>
+        <div id="debugEd" hidden>
+          <canvas id="debugEdCanvas"></canvas>
+          <pre id="debugEdText"></pre>
+        </div>
+      </div>
     </div>
     </div><!-- /scan-screen -->
 
@@ -197,15 +206,6 @@
       <div class="suggest" id="suggest" hidden></div>
     </details>
 
-    <div class="debug" id="debug" hidden>
-      <div class="muted small">Diagnostic : ce que lit le scanner</div>
-      <canvas id="debugCanvas"></canvas>
-      <pre id="debugText"></pre>
-      <div id="debugEd" hidden>
-        <canvas id="debugEdCanvas"></canvas>
-        <pre id="debugEdText"></pre>
-      </div>
-    </div>
   </section>
 
   <!-- ===== Liste ===== -->
@@ -449,6 +449,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=60"></script>
+<script type="module" src="app.js?v=61"></script>
 </body>
 </html>

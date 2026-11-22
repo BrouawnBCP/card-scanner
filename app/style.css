@@ -555,3 +555,8 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .list-games .seg[data-count]:not([data-count=""])::after{position:static;font:700 9px/1 var(--f-mono);color:var(--muted)}
 .list-games .seg.on[data-count]::after{color:var(--ink)}
 .export-dir{display:flex;align-items:center;gap:12px;justify-content:space-between}.export-dir>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+/* diagnostic mode: shown over the camera, so it is visible while scanning */
+#view-scan .debug{position:absolute;left:8px;right:8px;bottom:98px;z-index:5;max-height:46%;overflow:auto;background:rgba(4,6,16,.86);border:1px solid rgba(120,170,255,.35);border-radius:12px;padding:8px;gap:4px;pointer-events:auto}
+#view-scan .debug canvas{max-height:72px;width:auto;max-width:100%;align-self:flex-start}
+#view-scan .debug pre{font-size:10.5px;line-height:1.35;color:#dfe8ff}
+#view-scan .debug .muted{font-size:10px}
