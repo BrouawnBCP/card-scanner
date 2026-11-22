@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "65";
+const APP_VERSION = "66";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -185,7 +185,7 @@ function makeItem(m, extra = {}) {
 const L2D = { O: "0", Q: "0", D: "0", U: "0", I: "1", L: "1", J: "1", T: "7", Z: "2", S: "5", B: "8", G: "6", A: "4" };
 const D2L = { 0: "O", 1: "I", 5: "S", 8: "B", 2: "Z", 6: "G", 4: "A", 7: "T" };
 const REGION_FIX = { EH: "EN", FN: "EN", EW: "EN", ER: "FR", PR: "FR", FA: "FR", FB: "FR", DF: "DE", OE: "DE", IF: "IT", SF: "SP", SR: "SP", PF: "PT" };
-function prefixVariants(p) {
+function prefixVariants(p, loose = false) {
   if (PREFIXES.has(p)) return [p];
   const opts = [...p].map((ch) => { const s = new Set([ch]); if (L2D[ch]) s.add(L2D[ch]); if (D2L[ch]) s.add(D2L[ch]); return [...s]; });
   const out = [];
@@ -194,10 +194,18 @@ function prefixVariants(p) {
     if (i === opts.length) { if (PREFIXES.has(acc)) out.push(acc); return; }
     for (const c of opts[i]) { const ch = c !== p[i]; if (ch && changes >= 2) continue; rec(i + 1, acc + c, changes + (ch ? 1 : 0)); }
   })(0, "", 0);
+  // The corrections below only for a clean "XXXX-FR123" read (hyphen, language, 3 real digits): on
+  // ordinary words they invent codes ("UNE FOIS" would be DUNE-015).
+  if (!loose) return out;
   // a vertical stroke (artwork spilling over the code on Overframe cards, a card edge) read as an extra
   // I / L / 1 / J: "MIAMS" is MAMS. Not an exact read, so it still needs a second matching frame.
   if (!out.length && p.length >= 4)
     for (let i = 0; i < p.length; i++) if ("IL1J".includes(p[i])) { const q = p.slice(0, i) + p.slice(i + 1); if (PREFIXES.has(q) && !out.includes(q)) out.push(q); }
+  // a thin I read as T ("PHNT" is PHNI)
+  if (!out.length && p.includes("T"))
+    for (let i = 0; i < p.length; i++) if (p[i] === "T") { const q = p.slice(0, i) + "I" + p.slice(i + 1); if (PREFIXES.has(q) && !out.includes(q)) out.push(q); }
+  // the first letter lost against the card frame ("NFO" is INFO): only when a single set fits
+  if (!out.length && p.length === 3) { const fit = [...PREFIXES].filter((q) => q.length === 4 && q.endsWith(p)); if (fit.length === 1) out.push(fit[0]); }
   return out;
 }
 // Letters OCR may return in place of a digit (Z is ambiguous: 2 or 7).
@@ -218,12 +226,12 @@ function parseSuffix(s) {
   if (reg !== raw || !REGION[reg]) clean = false;
   return { region: REGION[reg] ? reg : "", nums, clean };
 }
-function tryCode(pre, suf, out) {
+function tryCode(pre, suf, out, hyphen = false) {
   pre = pre.replace(/[^A-Z0-9]/g, ""); suf = suf.replace(/[^A-Z0-9]/g, "");
   if (pre.length < 2 || pre.length > 5) return;
   const sx = parseSuffix(suf); if (!sx) return;
   const found = [];
-  for (const pv of prefixVariants(pre)) for (const n of sx.nums) {
+  for (const pv of prefixVariants(pre, hyphen && /^[A-Z]{2}\d{3}$/.test(suf) && !!REGION[suf.slice(0, 2)])) for (const n of sx.nums) {
     const key = pv + "-" + n;
     if (DATA.prints[key]) found.push({ key, code: `${pv}-${sx.region}${n}`, region: sx.region });
   }
@@ -246,7 +254,7 @@ function matchAll(text) {
       if (toks[i + 1]) variants.push(toks[i] + toks[i + 1]);
       for (const s of variants) {
         const j = s.indexOf("-");
-        if (j > 0) { tryCode(s.slice(0, j), s.slice(j + 1).replace(/-/g, ""), out); continue; }
+        if (j > 0) { tryCode(s.slice(0, j), s.slice(j + 1).replace(/-/g, ""), out, true); continue; }
         // 5 digits in a row with no hyphen: the card's passcode (bottom left, "27204311"), never a set code
         if (s.length >= 7 && s.length <= 11 && !/^\d{5}/.test(s)) for (let k = 2; k <= 5; k++) tryCode(s.slice(0, k), s.slice(k), out);
       }
@@ -628,6 +636,52 @@ function enhance(src) {
   g.putImageData(img, 0, 0);
   return c;
 }
+/** Black and white copy with the contrast stretched: a dark code on a dark holo frame stands out (cheap). */
+function grayStretch(c) {
+  const g = c.getContext("2d", { willReadFrequently: true }), im = g.getImageData(0, 0, c.width, c.height), d = im.data;
+  const n = d.length / 4, L = new Uint8Array(n), hist = new Uint32Array(256);
+  for (let i = 0, j = 0; j < n; i += 4, j++) { L[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; hist[L[j]]++; }
+  let lo = 0, hi = 255, acc = 0; const cut = n * 0.01;
+  while (lo < 255 && (acc += hist[lo]) < cut) lo++;
+  acc = 0; while (hi > 0 && (acc += hist[hi]) < cut) hi--;
+  const span = Math.max(1, hi - lo);
+  for (let i = 0, j = 0; j < n; i += 4, j++) { const t = Math.max(0, Math.min(255, ((L[j] - lo) * 255) / span)); d[i] = d[i + 1] = d[i + 2] = t; }
+  g.putImageData(im, 0, 0);
+  return c;
+}
+/* ----- Yu-Gi-Oh plan B: the passcode printed bottom left ("30453613 1st Edition") names the card for sure;
+   any piece of its set code read elsewhere ("FR09", "095") then tells which of its prints it is. ----- */
+let passMem = null, cardKeys = null;
+function keysOfCard(idx) {
+  if (!cardKeys) { cardKeys = new Map(); for (const [k, l] of Object.entries(DATA.prints)) for (const e of l) { if (!cardKeys.has(e[0])) cardKeys.set(e[0], new Set()); cardKeys.get(e[0]).add(k); } }
+  return [...(cardKeys.get(idx) || [])];
+}
+let idOfCard = null;
+function passcodeIn(texts) {
+  if (!idOfCard) idOfCard = new Map(DATA.cards.map((c, i) => [c[2], i]));
+  for (const t of texts) {
+    const mm = String(t).replace(/[Oo]/g, "0").match(/(?:^|\D)(\d{8})(?!\d)/);
+    if (mm && idOfCard.has(Number(mm[1]))) return idOfCard.get(Number(mm[1]));
+  }
+  return null;
+}
+function byPasscode(idx, texts, fresh) {
+  const keys = keysOfCard(idx); if (!keys.length) return null;
+  const regionOf = (t) => (String(t).toUpperCase().match(/(FR|EN|DE|IT|SP|PT)[0-9OIL]{2,3}\b/) || [])[1] || REGION_OF[settings.lang] || "";
+  const mk = (key, t) => { const [p, n] = key.split("-"), reg = regionOf(t); return { key, code: `${p}-${reg}${n}`, region: reg, unsure: false, exact: false, plan: "passcode" }; };
+  // short lines only (a set code), digits read as letters put back: "FRO9S" → 095
+  const nums = [];
+  for (const t of texts) {
+    const s = String(t).toUpperCase(); if (s.length > 16 || /\d{6}/.test(s)) continue;
+    const dg = s.replace(/[OQD]/g, "0").replace(/[IL]/g, "1").replace(/S/g, "5");
+    for (const mm of dg.matchAll(/(?:^|[^0-9])([0-9]{3})(?![0-9])/g)) nums.push([mm[1], t]);
+  }
+  const hits = keys.filter((k) => nums.some(([n]) => k.endsWith("-" + n)));
+  if (hits.length === 1) return mk(hits[0], nums.find(([n]) => hits[0].endsWith("-" + n))[1]);
+  // a card printed in a single set: the passcode alone is enough (still read twice before adding)
+  if (keys.length === 1 && fresh) return mk(keys[0], "");
+  return null;
+}
 /** A strip of the camera picture turned a quarter turn (dir 1: clockwise), so vertical text reads left to right. */
 function turnedStrip(x, y, w, h, dir, max = 1280) {
   x = Math.max(0, x); y = Math.max(0, y); w = Math.min(cam.videoWidth - x, w); h = Math.min(cam.videoHeight - y, h);
@@ -650,7 +704,9 @@ async function readCodeStrip(r) {
     strip.width = Math.round(w * k); strip.height = Math.round(h * k);
     const sg = strip.getContext("2d", { willReadFrequently: true }); sg.imageSmoothingQuality = "high";
     sg.drawImage(cam, x0, y0, w, h, 0, 0, strip.width, strip.height);
-    const prefer = (b) => (b.w / strip.width > 0.75 ? 1 : 0) + (b.x + b.w > strip.width * 0.55 ? 0 : 0.5);
+    grayStretch(strip); // dark code on a dark holo frame (Quarter Century, Starlight)
+    // the code is a short line that does not touch the strip's edges (effect text cut by the strip does)
+    const prefer = (b) => (b.x < strip.width * 0.02 || b.x + b.w > strip.width * 0.98 ? 2 : 0) + (b.x + b.w > strip.width * 0.55 ? 0 : 0.5) + b.w / strip.width;
     const res = await readCodes(strip, { prefer, maxLines: 3 });
     return Object.assign(res, { canvas: strip, ox: x0, oy: y0, k });
   } catch (e) { console.warn(e); return null; }
@@ -667,7 +723,7 @@ async function readBottomLeft(r) {
     // short lines first (the code), long ones (effect text) last
     const prefer = (b) => (b.w / strip.width > 0.6 ? 1 : 0) + Math.abs((b.y + b.h / 2) / strip.height - 0.55);
     const res = await readCodes(strip, { prefer, maxLines: 4 });
-    return { matches: res.matches, lines: [] };
+    return { matches: res.matches, lines: res.lines };
   } catch (e) { console.warn(e); return { matches: [], lines: [] }; }
 }
 
@@ -738,7 +794,7 @@ async function scanFrame() {
   const sig = signature(r);
   if (!changed) {
     // The card just added is still in front of the camera: only watch (cheaply) for it to move away.
-    if (sigDiff(sig, last.sig) > 22) { if (++changedHits >= 2) { changed = true; reads = []; sawEmpty = false; setStatus("Recherche du code…"); } }
+    if (sigDiff(sig, last.sig) > 22) { if (++changedHits >= 2) { changed = true; reads = []; sawEmpty = false; passMem = null; setStatus("Recherche du code…"); } }
     else changedHits = 0;
     if (!changed) {
       // …and look a few more times for a "1st Edition" mention missed on the first read
@@ -782,10 +838,18 @@ async function scanFrame() {
     if (step === 5 && !res.matches.some((x) => !x.unsure)) {
       const extra = await readBottomLeft(r);
       if (!scanning || token !== loopToken) return;
-      res.matches.push(...extra.matches);
+      res.matches.push(...extra.matches); res.extraTexts = extra.lines.map((l) => l.text);
     }
   }
   if (!scanning || token !== loopToken) return;
+  // plan B: passcode read on this frame or a recent one (same card) + a piece of the set code
+  const texts = [...res.lines.map((l) => l.text || ""), ...(res.extraTexts || [])];
+  const pc = passcodeIn(texts), now = performance.now();
+  if (pc != null) passMem = { idx: pc, at: now, ed: false };
+  // "30453613 1st Edition" read next to the passcode (not "Limited Edition"): a first edition
+  if (passMem && texts.some((t) => /\d{6}/.test(t) && /EDI?TI?O?N/i.test(t) && !/LIMIT/i.test(t))) passMem.ed = true;
+  else if (passMem && now - passMem.at > 4000) passMem = null;
+  if (passMem && !res.matches.some((x) => !x.unsure)) { const f = byPasscode(passMem.idx, texts, pc != null); if (f) res.matches.push(f); }
   if (settings.debug || replaying) showDebug(zone, res, r);
   if (replaying) return;
   const m = res.matches.find((x) => !x.unsure) || null;
@@ -807,12 +871,13 @@ async function scanFrame() {
     const line = res.lines.find((l) => l.matches.some((x) => x.key === m.key));
     const fromY = line ? oy + (line.box.y + line.box.h) / k : r.y + r.h * 0.76;
     const ed = await readEdition(r, fromY);
+    if (ed.ed !== true && passMem?.ed && keysOfCard(passMem.idx).includes(m.key)) ed.ed = true; // read on a frame just before
     const it = makeItem(m, { firstEd: ed.ed === true });
     const shot = camMode === "photo" ? capturePhoto(r) : null; // picture taken right away, while the card is still in the frame
     commit(it, "scan");
     if (shot) attachPhoto(shot, it, lastAdded?.id);
     last = { sig, key: m.key, itemId: lastAdded?.id, edPending: ed.ed ? 0 : 3, edFrom: (fromY - r.y) / r.h };
-    changed = false; changedHits = 0; reads = []; sawEmpty = false;
+    changed = false; changedHits = 0; reads = []; sawEmpty = false; passMem = null;
     celebrate(it);
     setStatus(`Ajoutée${shot ? " + photo" : ""} : <span class="code">${esc(m.code)}</span> ${esc(it.nameFR)}${ed.ed ? " · 1re édition" : ""}${addedPrice(it)}`);
   } else setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`);
@@ -2550,6 +2615,6 @@ bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
-  enhance, turnedStrip, readCodeStrip, replayFrame, matchAll, matchManual, matchRiftbound, matchOnePiece, matchPokemon, pickByName, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
+  enhance, turnedStrip, readCodeStrip, replayFrame, passcodeIn, byPasscode, matchAll, matchManual, matchRiftbound, matchOnePiece, matchPokemon, pickByName, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
   async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getEngine(); scanning = wantScan = true; reads = []; changed = true; loop(); },
 };
