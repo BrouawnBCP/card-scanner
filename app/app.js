@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "61";
+const APP_VERSION = "62";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -597,6 +597,56 @@ async function loop() {
 const LOWER = { y: 0.56, h: 0.46, x: -0.04, w: 1.08 };
 let sawEmpty = true; // a frame without any readable code since the last card was added
 
+/* ----- harder cards (holo foils like Starlight, codes printed on the artwork, glare): a cleaned-up copy ----- */
+/** Black and white copy, holo glitter smoothed out (3×3 median) and contrast stretched: the letters stand out. */
+function enhance(src) {
+  const w = src.width, h = src.height, c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(src, 0, 0);
+  const img = g.getImageData(0, 0, w, h), d = img.data, L = new Uint8Array(w * h), M = new Uint8Array(w * h);
+  for (let i = 0, j = 0; j < L.length; i += 4, j++) L[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+  const v = new Uint8Array(9);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!x || !y || x === w - 1 || y === h - 1) { M[y * w + x] = L[y * w + x]; continue; }
+    let k = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) v[k++] = L[(y + dy) * w + x + dx];
+    v.sort(); M[y * w + x] = v[4];
+  }
+  const hist = new Uint32Array(256); for (const p of M) hist[p]++;
+  let lo = 0, hi = 255, acc = 0; const cut = M.length * 0.02;
+  while (lo < 255 && (acc += hist[lo]) < cut) lo++;
+  acc = 0; while (hi > 0 && (acc += hist[hi]) < cut) hi--;
+  const span = Math.max(1, hi - lo);
+  for (let i = 0, j = 0; j < M.length; i += 4, j++) { const t = Math.max(0, Math.min(255, ((M[j] - lo) * 255) / span)); d[i] = d[i + 1] = d[i + 2] = t; }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+/** A strip of the camera picture turned a quarter turn (dir 1: clockwise), so vertical text reads left to right. */
+function turnedStrip(x, y, w, h, dir, max = 1280) {
+  x = Math.max(0, x); y = Math.max(0, y); w = Math.min(video.videoWidth - x, w); h = Math.min(video.videoHeight - y, h);
+  const k = Math.min(1, max / Math.max(w, h)), c = document.createElement("canvas");
+  c.width = Math.round(h * k); c.height = Math.round(w * k);
+  const g = c.getContext("2d"); g.imageSmoothingQuality = "high";
+  if (dir > 0) { g.translate(c.width, 0); g.rotate(Math.PI / 2); } else { g.translate(0, c.height); g.rotate(-Math.PI / 2); }
+  g.drawImage(video, x, y, w, h, 0, 0, w * k, h * k);
+  return c;
+}
+/* ----- Yu-Gi-Oh: the code line itself (right, just under the artwork), at full camera resolution ----- */
+async function readCodeStrip(r) {
+  try {
+    const x0 = Math.max(0, r.x + r.w * 0.4), y0 = Math.max(0, r.y + r.h * 0.66);
+    const w = Math.min(video.videoWidth - x0, r.w * 0.64), h = Math.min(video.videoHeight - y0, r.h * 0.16);
+    if (w < 20 || h < 20) return { matches: [] };
+    // full camera resolution, enlarged when small (the code is tiny: the text finder needs it bigger)
+    const k = Math.max(1, Math.min(2.5, 960 / w)), strip = document.createElement("canvas");
+    strip.width = Math.round(w * k); strip.height = Math.round(h * k);
+    const sg = strip.getContext("2d", { willReadFrequently: true }); sg.imageSmoothingQuality = "high";
+    sg.drawImage(video, x0, y0, w, h, 0, 0, strip.width, strip.height);
+    const prefer = (b) => (b.w / strip.width > 0.75 ? 1 : 0) + (b.x + b.w > strip.width * 0.55 ? 0 : 0.5);
+    let res = await readCodes(strip, { prefer, maxLines: 3 });
+    if (!res.matches.some((x) => !x.unsure)) res = await readCodes(enhance(strip), { prefer, maxLines: 3 });
+    return { matches: res.matches };
+  } catch (e) { console.warn(e); return { matches: [] }; }
+}
+let rescueTick = 0;
 /* ----- Pendulum cards: set code at the bottom left, under the text box ----- */
 let pendTick = 0;
 async function readBottomLeft(r) {
@@ -651,11 +701,12 @@ function diagnose(zone, res, textH) {
   // detected text lines are about 2.5× the letter height: compare every line found (even the ones too big
   // or too small to be read) with the size expected for a card that fills the frame
   if (!textH) return st.sharp < 18 ? "blur" : res.matches.some((x) => x.unsure) ? "unsure" : "nocode";
-  const hs = all.map((b) => b.h).sort((a, b) => a - b), med = hs[hs.length >> 1], ratio = med / (2.5 * textH);
+  const read = res.lines.filter((l) => (l.text || "").replace(/[^A-Za-z0-9]/g, "").length >= 3).map((l) => l.box);
+  const hs = (read.length >= 2 ? read : all).map((b) => b.h).sort((a, b) => a - b), med = hs[hs.length >> 1], ratio = med / (2.5 * textH);
   window.__diag = { ratio, hs, textH, ...st }; // for troubleshooting from the console
   // measured on a card that fills the frame: ratio ≈ 0.6 with several lines found
   if (ratio < 0.42) return "far";
-  if (ratio > 1.3) return "close";
+  if (ratio > 1.3 && read.length >= 2) return "close"; // only when real text lines look too big
   if (st.sharp < 18) return "blur";
   if (res.matches.some((x) => x.unsure)) return "unsure";
   return "nocode";
@@ -709,11 +760,15 @@ async function scanFrame() {
   const token = loopToken;
   const res = await readCodes(zone, { textH, prefer, maxLines: 5 });
   if (!scanning || token !== loopToken) return;
-  // Pendulum cards print the code small, bottom left: every other failed frame, read that corner at full resolution.
-  if (!res.matches.some((x) => !x.unsure) && (pendTick++ % 2 === 0)) {
-    const extra = await readBottomLeft(r);
+  // A failed frame gets a second chance, a different one each time: the bottom-left corner at full resolution
+  // (Pendulum cards, every other time), the code line at full resolution (holo foils: Starlight, Overframe…),
+  // and the whole area cleaned of glare.
+  if (!res.matches.some((x) => !x.unsure)) {
+    const step = pendTick++ % 4;
+    const extra = step % 2 === 0 ? await readBottomLeft(r) : step === 1 ? await readCodeStrip(r)
+      : await readCodes(enhance(zone), { textH, prefer, maxLines: 5 });
     if (!scanning || token !== loopToken) return;
-    res.matches.push(...extra.matches); res.lines.push(...extra.lines);
+    res.matches.push(...extra.matches);
   }
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
@@ -756,6 +811,18 @@ async function scanRiftbound(r, sig) {
   const token = loopToken;
   const res = await readCodes(zone, { prefer, maxLines: 4, match: matchRiftbound });
   if (!scanning || token !== loopToken) return;
+  if (!res.matches.some((x) => !x.unsure)) {
+    // Battlefields are printed sideways: held upright, their code runs along the right edge (or the left one,
+    // card turned the other way). Read those edges turned a quarter turn; every third time, the area without glare.
+    const step = rescueTick++ % 3;
+    const src = step === 0 ? turnedStrip(r.x + r.w * 0.76, r.y - r.h * 0.02, r.w * 0.3, r.h * 1.04, 1)
+      : step === 1 ? turnedStrip(r.x - r.w * 0.06, r.y - r.h * 0.02, r.w * 0.3, r.h * 1.04, -1) : enhance(zone);
+    // Turned, the card's outer edge (where the code runs) ends up at the bottom: read the lowest lines first.
+    const prefer2 = step < 2 ? (b) => -(b.y + b.h) / src.height : prefer;
+    const extra = await readCodes(src, { maxLines: 4, match: matchRiftbound, prefer: prefer2 });
+    if (!scanning || token !== loopToken) return;
+    res.matches.push(...extra.matches);
+  }
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
@@ -788,6 +855,11 @@ async function scanOnePiece(r, sig) {
   const token = loopToken;
   const res = await readCodes(zone, { prefer, maxLines: 4, match: matchOnePiece });
   if (!scanning || token !== loopToken) return;
+  if (!res.matches.some((x) => !x.unsure) && rescueTick++ % 2 === 0) {
+    const extra = await readCodes(enhance(zone), { prefer, maxLines: 4, match: matchOnePiece });
+    if (!scanning || token !== loopToken) return;
+    res.matches.push(...extra.matches);
+  }
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
@@ -822,6 +894,11 @@ async function scanPokemon(r, sig) {
   const token = loopToken;
   const res = await readCodes(zone, { prefer, maxLines: 5, match: matchPokemon });
   if (!scanning || token !== loopToken) return;
+  if (!res.matches.length && rescueTick++ % 2 === 0) {
+    const extra = await readCodes(enhance(zone), { prefer, maxLines: 5, match: matchPokemon });
+    if (!scanning || token !== loopToken) return;
+    res.matches.push(...extra.matches);
+  }
   if (settings.debug) showDebug(zone, res, r);
   const m = res.matches[0] || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
@@ -2359,6 +2436,6 @@ bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
-  matchAll, matchManual, matchRiftbound, matchOnePiece, matchPokemon, pickByName, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
+  enhance, turnedStrip, readCodeStrip, matchAll, matchManual, matchRiftbound, matchOnePiece, matchPokemon, pickByName, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
   async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getEngine(); scanning = wantScan = true; reads = []; changed = true; loop(); },
 };
