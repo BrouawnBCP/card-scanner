@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "64";
+const APP_VERSION = "65";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -238,6 +238,8 @@ function matchAll(text) {
   const out = [];
   const lines = text.toUpperCase().replace(/[—–_~=]/g, "-").split(/\n+/);
   for (const line of lines) {
+    // the copyright line ("©2020 Studio Dice/SHUEISHA, TV TOKYO, KONAMI"): "2020 STUDI" would read as 2020-001
+    if (/STUD|DICE|SHUE|EISHA|TOKYO|KONAM|©/.test(line)) continue;
     const toks = line.replace(/[^A-Z0-9\- ]/g, " ").split(/\s+/).filter(Boolean);
     for (let i = 0; i < toks.length; i++) {
       const variants = [toks[i]];
@@ -642,17 +644,16 @@ async function readCodeStrip(r) {
     // tall strip: held a bit far, the card is smaller than the frame and its code sits higher (≈ 58–66 %)
     const x0 = Math.max(0, r.x + r.w * 0.4), y0 = Math.max(0, r.y + r.h * 0.54);
     const w = Math.min(cam.videoWidth - x0, r.w * 0.64), h = Math.min(cam.videoHeight - y0, r.h * 0.26);
-    if (w < 20 || h < 20) return { matches: [] };
+    if (w < 20 || h < 20) return null;
     // full camera resolution, enlarged when small (the code is tiny: the text finder needs it bigger)
     const k = Math.max(1, Math.min(2.5, 960 / w)), strip = document.createElement("canvas");
     strip.width = Math.round(w * k); strip.height = Math.round(h * k);
     const sg = strip.getContext("2d", { willReadFrequently: true }); sg.imageSmoothingQuality = "high";
     sg.drawImage(cam, x0, y0, w, h, 0, 0, strip.width, strip.height);
     const prefer = (b) => (b.w / strip.width > 0.75 ? 1 : 0) + (b.x + b.w > strip.width * 0.55 ? 0 : 0.5);
-    let res = await readCodes(strip, { prefer, maxLines: 3 });
-    if (!res.matches.some((x) => !x.unsure)) res = await readCodes(enhance(strip), { prefer, maxLines: 3 });
-    return { matches: res.matches };
-  } catch (e) { console.warn(e); return { matches: [] }; }
+    const res = await readCodes(strip, { prefer, maxLines: 3 });
+    return Object.assign(res, { canvas: strip, ox: x0, oy: y0, k });
+  } catch (e) { console.warn(e); return null; }
 }
 let rescueTick = 0;
 /* ----- Pendulum cards: set code at the bottom left, under the text box ----- */
@@ -754,38 +755,47 @@ async function scanFrame() {
   if (game === "rb") return scanRiftbound(r, sig);
   if (game === "op") return scanOnePiece(r, sig);
   if (game === "pk") return scanPokemon(r, sig);
-  const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
-  const zw = Math.min(cam.videoWidth - zx, r.w * LOWER.w), zh = Math.min(cam.videoHeight - zy, r.h * LOWER.h);
-  const zone = grab(cam, zx, zy, zw, zh, 960);
-  const k = zone.height / zh, textH = r.h * 0.017 * k;
-  // Read first the lines that look like a set code: a short line either under the artwork on the right
-  // (most cards) or at the bottom left, under the text box (Pendulum cards). Long lines are effect text.
-  const prefer = (b) => {
-    const cy = (b.y + b.h / 2) / zone.height, cx = (b.x + b.w / 2) / zone.width, wide = b.w / zone.width > 0.5 ? 0.6 : 0;
-    const normal = Math.abs(cy - 0.3) + (b.x + b.w > zone.width * 0.7 ? 0 : 0.4);
-    const pendulum = Math.max(0, 0.6 - cy) + (cx < 0.45 ? 0 : 0.5);
-    return Math.min(normal, pendulum) + wide;
-  };
-  const token = loopToken;
-  const res = await readCodes(zone, { textH, prefer, maxLines: 5 });
-  if (!scanning || token !== loopToken) return;
-  // A failed frame gets a second chance, read at full camera resolution.
-  if (!res.matches.some((x) => !x.unsure)) {
-    // alternate: the code line at full resolution (rescues most holo cards: Starlight, Quarter Century,
-    // Overframe…) and the bottom-left corner (Pendulum cards)
-    const extra = pendTick++ % 2 === 0 ? await readCodeStrip(r) : await readBottomLeft(r);
+  // One reading per frame, in turn (measured on a real recording: the code line alone finds most cards in
+  // ≈ 0.3 s, the whole lower half rarely and in ≈ 0.55 s):
+  //  2 frames out of 3: the code line, right under the artwork, at full camera resolution;
+  //  every 3rd frame: the whole lower half (badly placed card, Pendulum code bottom left), and every other
+  //  time, when that fails too, the bottom-left corner at full resolution (Pendulum cards).
+  const step = pendTick++ % 6, token = loopToken;
+  let zone, res, textH = 0, ox, oy, k;
+  if (step % 3 !== 2) res = await readCodeStrip(r);
+  if (res) ({ canvas: zone, ox, oy, k } = res);
+  else {
+    const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
+    const zw = Math.min(cam.videoWidth - zx, r.w * LOWER.w), zh = Math.min(cam.videoHeight - zy, r.h * LOWER.h);
+    zone = grab(cam, zx, zy, zw, zh, 960);
+    ox = zx; oy = zy; k = zone.height / zh; textH = r.h * 0.017 * k;
+    // Read first the lines that look like a set code: a short line either under the artwork on the right
+    // (most cards) or at the bottom left, under the text box (Pendulum cards). Long lines are effect text.
+    const prefer = (b) => {
+      const cy = (b.y + b.h / 2) / zone.height, cx = (b.x + b.w / 2) / zone.width, wide = b.w / zone.width > 0.5 ? 0.6 : 0;
+      const normal = Math.abs(cy - 0.3) + (b.x + b.w > zone.width * 0.7 ? 0 : 0.4);
+      const pendulum = Math.max(0, 0.6 - cy) + (cx < 0.45 ? 0 : 0.5);
+      return Math.min(normal, pendulum) + wide;
+    };
+    res = await readCodes(zone, { textH, prefer, maxLines: 5 });
     if (!scanning || token !== loopToken) return;
-    res.matches.push(...extra.matches);
+    if (step === 5 && !res.matches.some((x) => !x.unsure)) {
+      const extra = await readBottomLeft(r);
+      if (!scanning || token !== loopToken) return;
+      res.matches.push(...extra.matches);
+    }
   }
+  if (!scanning || token !== loopToken) return;
   if (settings.debug || replaying) showDebug(zone, res, r);
   if (replaying) return;
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
   if (!m) {
-    if (!res.boxes.length || res.lines.every((l) => !l.text)) sawEmpty = true;
+    // no text at all in the lower half: the card has left (the code line alone may be blank on a card still there)
+    if (textH && (!res.boxes.length || res.lines.every((l) => !l.text))) sawEmpty = true;
     setStatus("Recherche du code…");
-    // after a few failed reads, tell the person what is probably wrong
-    if (++failStreak >= 3) showHint(diagnose(zone, res, textH));
+    // after a few failed reads, tell the person what is probably wrong (judged on the lower-half readings)
+    if (++failStreak >= 3 && textH) showHint(diagnose(zone, res, textH));
     return;
   }
   failStreak = 0; showHint(null);
@@ -795,7 +805,7 @@ async function scanFrame() {
   if (m.exact || hits >= 2) {
     // The edition mention is the lowest line on the left, below the code line: read that strip on its own.
     const line = res.lines.find((l) => l.matches.some((x) => x.key === m.key));
-    const fromY = line ? zy + (line.box.y + line.box.h) / k : r.y + r.h * 0.76;
+    const fromY = line ? oy + (line.box.y + line.box.h) / k : r.y + r.h * 0.76;
     const ed = await readEdition(r, fromY);
     const it = makeItem(m, { firstEd: ed.ed === true });
     const shot = camMode === "photo" ? capturePhoto(r) : null; // picture taken right away, while the card is still in the frame
