@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "63";
+const APP_VERSION = "64";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -245,7 +245,8 @@ function matchAll(text) {
       for (const s of variants) {
         const j = s.indexOf("-");
         if (j > 0) { tryCode(s.slice(0, j), s.slice(j + 1).replace(/-/g, ""), out); continue; }
-        if (s.length >= 7 && s.length <= 11) for (let k = 2; k <= 5; k++) tryCode(s.slice(0, k), s.slice(k), out);
+        // 5 digits in a row with no hyphen: the card's passcode (bottom left, "27204311"), never a set code
+        if (s.length >= 7 && s.length <= 11 && !/^\d{5}/.test(s)) for (let k = 2; k <= 5; k++) tryCode(s.slice(0, k), s.slice(k), out);
       }
     }
   }
@@ -638,8 +639,9 @@ function turnedStrip(x, y, w, h, dir, max = 1280) {
 /* ----- Yu-Gi-Oh: the code line itself (right, just under the artwork), at full camera resolution ----- */
 async function readCodeStrip(r) {
   try {
-    const x0 = Math.max(0, r.x + r.w * 0.4), y0 = Math.max(0, r.y + r.h * 0.66);
-    const w = Math.min(cam.videoWidth - x0, r.w * 0.64), h = Math.min(cam.videoHeight - y0, r.h * 0.16);
+    // tall strip: held a bit far, the card is smaller than the frame and its code sits higher (≈ 58–66 %)
+    const x0 = Math.max(0, r.x + r.w * 0.4), y0 = Math.max(0, r.y + r.h * 0.54);
+    const w = Math.min(cam.videoWidth - x0, r.w * 0.64), h = Math.min(cam.videoHeight - y0, r.h * 0.26);
     if (w < 20 || h < 20) return { matches: [] };
     // full camera resolution, enlarged when small (the code is tiny: the text finder needs it bigger)
     const k = Math.max(1, Math.min(2.5, 960 / w)), strip = document.createElement("canvas");
@@ -767,13 +769,11 @@ async function scanFrame() {
   const token = loopToken;
   const res = await readCodes(zone, { textH, prefer, maxLines: 5 });
   if (!scanning || token !== loopToken) return;
-  // A failed frame gets a second chance, a different one each time: the bottom-left corner at full resolution
-  // (Pendulum cards, every other time), the code line at full resolution (holo foils: Starlight, Overframe…),
-  // and the whole area cleaned of glare.
+  // A failed frame gets a second chance, read at full camera resolution.
   if (!res.matches.some((x) => !x.unsure)) {
-    const step = pendTick++ % 4;
-    const extra = step % 2 === 0 ? await readBottomLeft(r) : step === 1 ? await readCodeStrip(r)
-      : await readCodes(enhance(zone), { textH, prefer, maxLines: 5 });
+    // alternate: the code line at full resolution (rescues most holo cards: Starlight, Quarter Century,
+    // Overframe…) and the bottom-left corner (Pendulum cards)
+    const extra = pendTick++ % 2 === 0 ? await readCodeStrip(r) : await readBottomLeft(r);
     if (!scanning || token !== loopToken) return;
     res.matches.push(...extra.matches);
   }
