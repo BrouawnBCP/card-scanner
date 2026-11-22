@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "62";
+const APP_VERSION = "63";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -194,6 +194,10 @@ function prefixVariants(p) {
     if (i === opts.length) { if (PREFIXES.has(acc)) out.push(acc); return; }
     for (const c of opts[i]) { const ch = c !== p[i]; if (ch && changes >= 2) continue; rec(i + 1, acc + c, changes + (ch ? 1 : 0)); }
   })(0, "", 0);
+  // a vertical stroke (artwork spilling over the code on Overframe cards, a card edge) read as an extra
+  // I / L / 1 / J: "MIAMS" is MAMS. Not an exact read, so it still needs a second matching frame.
+  if (!out.length && p.length >= 4)
+    for (let i = 0; i < p.length; i++) if ("IL1J".includes(p[i])) { const q = p.slice(0, i) + p.slice(i + 1); if (PREFIXES.has(q) && !out.includes(q)) out.push(q); }
   return out;
 }
 // Letters OCR may return in place of a digit (Z is ambiguous: 2 or 7).
@@ -453,12 +457,14 @@ async function readCodes(c, { textH = 0, maxLines = 8, prefer = null, match = ma
 
 /* ================= camera scanning ================= */
 const video = $("video");
+let cam = video; // a recorded frame (canvas) while replaying a diagnostic recording
 let stream = null, scanning = false, wantScan = false, audioCtx = null, wakeLock = null;
 let reads = [], last = null /* {sig} */, changed = true, changedHits = 0;
 
 function guideInVideo() {
+  if (replaying) return replaying.r;
   const st = $("stage").getBoundingClientRect(), gr = $("guide").getBoundingClientRect();
-  const vw = video.videoWidth, vh = video.videoHeight;
+  const vw = cam.videoWidth, vh = cam.videoHeight;
   const s = Math.max(st.width / vw, st.height / vh);
   const ox = (st.width - vw * s) / 2, oy = (st.height - vh * s) / 2;
   return { x: (gr.left - st.left - ox) / s, y: (gr.top - st.top - oy) / s, w: gr.width / s, h: gr.height / s };
@@ -466,7 +472,7 @@ function guideInVideo() {
 const sigCanvas = document.createElement("canvas"); sigCanvas.width = 24; sigCanvas.height = 35;
 function signature(r) {
   const g = sigCanvas.getContext("2d", { willReadFrequently: true });
-  g.drawImage(video, r.x, r.y, r.w, r.h, 0, 0, 24, 35);
+  g.drawImage(cam, r.x, r.y, r.w, r.h, 0, 0, 24, 35);
   const d = g.getImageData(0, 0, 24, 35).data, out = new Uint8Array(24 * 35);
   for (let i = 0, j = 0; i < d.length; i += 4, j++) out[j] = (d[i] + d[i + 1] + d[i + 2]) / 3;
   return out;
@@ -486,8 +492,8 @@ function resetVideo() {
 }
 async function waitForFrames(ms = 4000) {
   const t0 = Date.now();
-  while (!video.videoWidth && Date.now() - t0 < ms) await sleep(100);
-  if (!video.videoWidth) throw Object.assign(new Error("no frames"), { name: "NoFrames" });
+  while (!cam.videoWidth && Date.now() - t0 < ms) await sleep(100);
+  if (!cam.videoWidth) throw Object.assign(new Error("no frames"), { name: "NoFrames" });
 }
 async function startCamera() {
   if (!DATA) { toast("La base de cartes charge encore…"); return; }
@@ -621,25 +627,25 @@ function enhance(src) {
 }
 /** A strip of the camera picture turned a quarter turn (dir 1: clockwise), so vertical text reads left to right. */
 function turnedStrip(x, y, w, h, dir, max = 1280) {
-  x = Math.max(0, x); y = Math.max(0, y); w = Math.min(video.videoWidth - x, w); h = Math.min(video.videoHeight - y, h);
+  x = Math.max(0, x); y = Math.max(0, y); w = Math.min(cam.videoWidth - x, w); h = Math.min(cam.videoHeight - y, h);
   const k = Math.min(1, max / Math.max(w, h)), c = document.createElement("canvas");
   c.width = Math.round(h * k); c.height = Math.round(w * k);
   const g = c.getContext("2d"); g.imageSmoothingQuality = "high";
   if (dir > 0) { g.translate(c.width, 0); g.rotate(Math.PI / 2); } else { g.translate(0, c.height); g.rotate(-Math.PI / 2); }
-  g.drawImage(video, x, y, w, h, 0, 0, w * k, h * k);
+  g.drawImage(cam, x, y, w, h, 0, 0, w * k, h * k);
   return c;
 }
 /* ----- Yu-Gi-Oh: the code line itself (right, just under the artwork), at full camera resolution ----- */
 async function readCodeStrip(r) {
   try {
     const x0 = Math.max(0, r.x + r.w * 0.4), y0 = Math.max(0, r.y + r.h * 0.66);
-    const w = Math.min(video.videoWidth - x0, r.w * 0.64), h = Math.min(video.videoHeight - y0, r.h * 0.16);
+    const w = Math.min(cam.videoWidth - x0, r.w * 0.64), h = Math.min(cam.videoHeight - y0, r.h * 0.16);
     if (w < 20 || h < 20) return { matches: [] };
     // full camera resolution, enlarged when small (the code is tiny: the text finder needs it bigger)
     const k = Math.max(1, Math.min(2.5, 960 / w)), strip = document.createElement("canvas");
     strip.width = Math.round(w * k); strip.height = Math.round(h * k);
     const sg = strip.getContext("2d", { willReadFrequently: true }); sg.imageSmoothingQuality = "high";
-    sg.drawImage(video, x0, y0, w, h, 0, 0, strip.width, strip.height);
+    sg.drawImage(cam, x0, y0, w, h, 0, 0, strip.width, strip.height);
     const prefer = (b) => (b.w / strip.width > 0.75 ? 1 : 0) + (b.x + b.w > strip.width * 0.55 ? 0 : 0.5);
     let res = await readCodes(strip, { prefer, maxLines: 3 });
     if (!res.matches.some((x) => !x.unsure)) res = await readCodes(enhance(strip), { prefer, maxLines: 3 });
@@ -652,9 +658,9 @@ let pendTick = 0;
 async function readBottomLeft(r) {
   try {
     const x0 = Math.max(0, r.x - r.w * 0.03), y0 = Math.max(0, r.y + r.h * 0.76);
-    const w = Math.min(video.videoWidth - x0, r.w * 0.62), h = Math.min(video.videoHeight - y0, r.h * 0.3);
+    const w = Math.min(cam.videoWidth - x0, r.w * 0.62), h = Math.min(cam.videoHeight - y0, r.h * 0.3);
     if (w < 20 || h < 20) return { matches: [], lines: [] };
-    const strip = grab(video, x0, y0, w, h, 1280);
+    const strip = grab(cam, x0, y0, w, h, 1280);
     // short lines first (the code), long ones (effect text) last
     const prefer = (b) => (b.w / strip.width > 0.6 ? 1 : 0) + Math.abs((b.y + b.h / 2) / strip.height - 0.55);
     const res = await readCodes(strip, { prefer, maxLines: 4 });
@@ -724,7 +730,7 @@ function showHint(kind) {
   box.hidden = false;
 }
 async function scanFrame() {
-  if (!video.videoWidth) { await sleep(100); return; }
+  if (!cam.videoWidth) { await sleep(100); return; }
   const r = guideInVideo();
   const sig = signature(r);
   if (!changed) {
@@ -742,12 +748,13 @@ async function scanFrame() {
       return;
     }
   }
+  if (rec.on) recSnap(r);
   if (game === "rb") return scanRiftbound(r, sig);
   if (game === "op") return scanOnePiece(r, sig);
   if (game === "pk") return scanPokemon(r, sig);
   const zx = Math.max(0, r.x + r.w * LOWER.x), zy = Math.max(0, r.y + r.h * LOWER.y);
-  const zw = Math.min(video.videoWidth - zx, r.w * LOWER.w), zh = Math.min(video.videoHeight - zy, r.h * LOWER.h);
-  const zone = grab(video, zx, zy, zw, zh, 960);
+  const zw = Math.min(cam.videoWidth - zx, r.w * LOWER.w), zh = Math.min(cam.videoHeight - zy, r.h * LOWER.h);
+  const zone = grab(cam, zx, zy, zw, zh, 960);
   const k = zone.height / zh, textH = r.h * 0.017 * k;
   // Read first the lines that look like a set code: a short line either under the artwork on the right
   // (most cards) or at the bottom left, under the text box (Pendulum cards). Long lines are effect text.
@@ -770,7 +777,8 @@ async function scanFrame() {
     if (!scanning || token !== loopToken) return;
     res.matches.push(...extra.matches);
   }
-  if (settings.debug) showDebug(zone, res, r);
+  if (settings.debug || replaying) showDebug(zone, res, r);
+  if (replaying) return;
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
   if (!m) {
@@ -804,8 +812,8 @@ async function scanFrame() {
 async function scanRiftbound(r, sig) {
   if (!RB) { setStatus("La base Riftbound charge encore…"); await sleep(400); return; }
   const zx = Math.max(0, r.x - r.w * 0.04), zy = Math.max(0, r.y + r.h * 0.56);
-  const zw = Math.min(video.videoWidth - zx, r.w * 0.66), zh = Math.min(video.videoHeight - zy, r.h * 0.5);
-  const zone = grab(video, zx, zy, zw, zh, 1280); // full resolution: the code is small
+  const zw = Math.min(cam.videoWidth - zx, r.w * 0.66), zh = Math.min(cam.videoHeight - zy, r.h * 0.5);
+  const zone = grab(cam, zx, zy, zw, zh, 1280); // full resolution: the code is small
   // short lines on the left first; long lines are effect text
   const prefer = (b) => (b.w / zone.width > 0.8 ? 1 : 0) + (b.x / zone.width > 0.35 ? 0.6 : 0) - ((b.y + b.h) / zone.height) * 0.2;
   const token = loopToken;
@@ -823,7 +831,8 @@ async function scanRiftbound(r, sig) {
     if (!scanning || token !== loopToken) return;
     res.matches.push(...extra.matches);
   }
-  if (settings.debug) showDebug(zone, res, r);
+  if (settings.debug || replaying) showDebug(zone, res, r);
+  if (replaying) return;
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
   if (!m) {
@@ -849,8 +858,8 @@ async function scanRiftbound(r, sig) {
 async function scanOnePiece(r, sig) {
   if (!EXTRA.op) { setStatus("La base One Piece charge encore…"); await sleep(400); return; }
   const zx = Math.max(0, r.x + r.w * 0.4), zy = Math.max(0, r.y + r.h * 0.82);
-  const zw = Math.min(video.videoWidth - zx, r.w * 0.64), zh = Math.min(video.videoHeight - zy, r.h * 0.22);
-  const zone = grab(video, zx, zy, zw, zh, 1280);
+  const zw = Math.min(cam.videoWidth - zx, r.w * 0.64), zh = Math.min(cam.videoHeight - zy, r.h * 0.22);
+  const zone = grab(cam, zx, zy, zw, zh, 1280);
   const prefer = (b) => (b.w / zone.width > 0.7 ? 1 : 0) + ((b.x + b.w) / zone.width < 0.6 ? 0.5 : 0) - ((b.y + b.h) / zone.height) * 0.3;
   const token = loopToken;
   const res = await readCodes(zone, { prefer, maxLines: 4, match: matchOnePiece });
@@ -860,7 +869,8 @@ async function scanOnePiece(r, sig) {
     if (!scanning || token !== loopToken) return;
     res.matches.push(...extra.matches);
   }
-  if (settings.debug) showDebug(zone, res, r);
+  if (settings.debug || replaying) showDebug(zone, res, r);
+  if (replaying) return;
   const m = res.matches.find((x) => !x.unsure) || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
   if (!m) {
@@ -887,8 +897,8 @@ async function scanOnePiece(r, sig) {
 async function scanPokemon(r, sig) {
   if (!EXTRA.pk) { ensureGame("pk"); setStatus("La base Pokémon charge…"); await sleep(500); return; }
   const zx = Math.max(0, r.x - r.w * 0.03), zy = Math.max(0, r.y + r.h * 0.84);
-  const zw = Math.min(video.videoWidth - zx, r.w * 1.06), zh = Math.min(video.videoHeight - zy, r.h * 0.2);
-  const zone = grab(video, zx, zy, zw, zh, 1280);
+  const zw = Math.min(cam.videoWidth - zx, r.w * 1.06), zh = Math.min(cam.videoHeight - zy, r.h * 0.2);
+  const zone = grab(cam, zx, zy, zw, zh, 1280);
   // the number is a short line: short lines first, effect text (long lines) last
   const prefer = (b) => (b.w / zone.width > 0.4 ? 1 : 0) - ((b.y + b.h) / zone.height) * 0.3;
   const token = loopToken;
@@ -899,7 +909,8 @@ async function scanPokemon(r, sig) {
     if (!scanning || token !== loopToken) return;
     res.matches.push(...extra.matches);
   }
-  if (settings.debug) showDebug(zone, res, r);
+  if (settings.debug || replaying) showDebug(zone, res, r);
+  if (replaying) return;
   const m = res.matches[0] || null;
   reads.push(m ? m.key : null); if (reads.length > 4) reads.shift();
   if (!m) {
@@ -914,7 +925,7 @@ async function scanPokemon(r, sig) {
   if (hits < 2) { setStatus(`Lu : <span class="code">${esc(m.code)}</span> — vérification…`); return; } // numbers are short: read twice
   const shot = camMode === "photo" ? capturePhoto(r) : null;
   if (m.needName) { // the same number exists in several sets: read the name at the top of the card
-    const top = grab(video, r.x, r.y, r.w, r.h * 0.15, 960), texts = [];
+    const top = grab(cam, r.x, r.y, r.w, r.h * 0.15, 960), texts = [];
     for (const b of (await detectText(top)).filter((b) => b.w > b.h * 1.5).slice(0, 4)) texts.push(await recognize(top, b));
     m.cards = pickByName(m.key, texts);
   }
@@ -931,10 +942,10 @@ async function scanPokemon(r, sig) {
 async function readOnePieceLang(r) {
   try {
     for (const [x0, w0] of [[0.82, 0.22], [0.86, 0.18]]) { // two strip widths: the edge of the card is not always at the same place
-      const sx = Math.max(0, r.x + r.w * x0), sy = Math.max(0, r.y + r.h * 0.45), sw = Math.min(video.videoWidth - sx, r.w * w0), sh = Math.min(video.videoHeight - sy, r.h * 0.52);
+      const sx = Math.max(0, r.x + r.w * x0), sy = Math.max(0, r.y + r.h * 0.45), sw = Math.min(cam.videoWidth - sx, r.w * w0), sh = Math.min(cam.videoHeight - sy, r.h * 0.52);
       const k = Math.max(1, 1100 / sh); // the text is tiny: enlarge small strips before reading
       const c = document.createElement("canvas"); c.width = Math.round(sh * k); c.height = Math.round(sw * k);
-      const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.translate(c.width, 0); g.rotate(Math.PI / 2); g.drawImage(video, sx, sy, sw, sh, 0, 0, sw * k, sh * k);
+      const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.translate(c.width, 0); g.rotate(Math.PI / 2); g.drawImage(cam, sx, sy, sw, sh, 0, 0, sw * k, sh * k);
       const z = grab(c, 0, 0, c.width, c.height, 1280);
       for (const b of (await detectText(z)).filter((b) => b.w > b.h * 3).slice(0, 3)) {
         const t = (await recognize(z, b)).toUpperCase();
@@ -954,10 +965,10 @@ function isEditionText(t) {
 }
 async function readEdition(r, fromY) {
   try {
-    const x0 = Math.max(0, r.x - r.w * 0.03), w = Math.min(video.videoWidth - x0, r.w * 0.62);
-    const y0 = Math.max(0, fromY), y1 = Math.min(video.videoHeight, r.y + r.h * 1.06);
+    const x0 = Math.max(0, r.x - r.w * 0.03), w = Math.min(cam.videoWidth - x0, r.w * 0.62);
+    const y0 = Math.max(0, fromY), y1 = Math.min(cam.videoHeight, r.y + r.h * 1.06);
     if (y1 - y0 < r.h * 0.05) return { ed: null, text: "" };
-    const strip = grab(video, x0, y0, w, y1 - y0, 1280); // full resolution: the mention is tiny
+    const strip = grab(cam, x0, y0, w, y1 - y0, 1280); // full resolution: the mention is tiny
     const boxes = (await detectText(strip))
       .filter((b) => b.w > b.h * 1.8 && b.x < strip.width * 0.55)
       .sort((a, b) => (b.y + b.h) - (a.y + a.h)).slice(0, 3);   // lowest lines first
@@ -993,14 +1004,107 @@ function markFirstEd(id) {
   saveItems(); renderLast(); toast("1re édition détectée");
 }
 function showDebug(zone, res, r) {
+  if (replaying) { replaying.res = res; return; }
+  recSave(res);
   const c = $("debugCanvas"); c.width = zone.width; c.height = zone.height;
   const g = c.getContext("2d"); g.drawImage(zone, 0, 0);
   g.lineWidth = 3;
   for (const b of res.boxes) { g.strokeStyle = "rgba(240,162,74,.9)"; g.strokeRect(b.x, b.y, b.w, b.h); }
   for (const l of res.lines) { g.strokeStyle = l.matches.length ? "#55c993" : "#3b82f6"; g.strokeRect(l.box.x, l.box.y, l.box.w, l.box.h); }
-  $("debugText").textContent = `Lignes lues : ${res.lines.map((l) => l.text || "∅").join(" ⏎ ") || "(aucune)"}\nCode(s) reconnu(s) : ${res.matches.map((m) => m.code + (m.unsure ? " (incertain)" : "")).join(", ") || "aucun"}\nVidéo ${video.videoWidth}×${video.videoHeight} · carte ${Math.round(r.w)}×${Math.round(r.h)} px · ${res.boxes.length} zone(s) de texte`;
+  $("debugText").textContent = `Lignes lues : ${res.lines.map((l) => l.text || "∅").join(" ⏎ ") || "(aucune)"}\nCode(s) reconnu(s) : ${res.matches.map((m) => m.code + (m.unsure ? " (incertain)" : "")).join(", ") || "aucun"}\nVidéo ${cam.videoWidth}×${cam.videoHeight} · carte ${Math.round(r.w)}×${Math.round(r.h)} px · ${res.boxes.length} zone(s) de texte`;
   $("debug").hidden = false;
 }
+/* ----- diagnostic recording: the real camera frames (full resolution, around the card) and what was read
+   on each, in one .zip to send for troubleshooting. Kept on the phone only until it is sent. ----- */
+const rec = { on: false, frames: [], snap: null, t0: 0, n: 0, file: null };
+const REC_MAX = 40; // the last 40 frames read (about 15 MB)
+function recSnap(r) {
+  const mx = r.w * 0.08, my = r.h * 0.06, x = Math.max(0, r.x - mx), y = Math.max(0, r.y - my);
+  const w = Math.min(cam.videoWidth - x, r.w + 2 * mx), h = Math.min(cam.videoHeight - y, r.h + 2 * my);
+  const c = document.createElement("canvas"); c.width = Math.round(w); c.height = Math.round(h);
+  c.getContext("2d").drawImage(cam, x, y, w, h, 0, 0, c.width, c.height);
+  rec.snap = { c, r: { x: r.x - x, y: r.y - y, w: r.w, h: r.h }, t: performance.now() };
+}
+function recSave(res) {
+  const sn = rec.snap; rec.snap = null;
+  if (!sn || !rec.on) return;
+  const rnd = (v) => Math.round(v);
+  const meta = {
+    i: ++rec.n, at: rnd(sn.t - rec.t0), ms: rnd(performance.now() - sn.t), game,
+    video: [cam.videoWidth, cam.videoHeight], r: [sn.r.x, sn.r.y, sn.r.w, sn.r.h].map(rnd), hint: hintShown,
+    lines: res.lines.map((l) => ({ text: l.text, box: [l.box.x, l.box.y, l.box.w, l.box.h].map(rnd) })), boxes: res.boxes.length,
+    matches: res.matches.map((m) => ({ code: m.code, key: m.key, unsure: !!m.unsure, exact: !!m.exact })),
+  };
+  sn.c.toBlob((b) => { if (!b || !rec.on) return; rec.frames.push({ meta, blob: b }); if (rec.frames.length > REC_MAX) rec.frames.shift(); recButton(); }, "image/jpeg", 0.9);
+}
+function recButton() {
+  const b = $("debugRec");
+  b.classList.toggle("on", rec.on); b.classList.toggle("ready", !!rec.file);
+  b.textContent = rec.on ? `■ Arrêter · ${rec.frames.length} image${rec.frames.length > 1 ? "s" : ""}` : rec.file ? "⇪ Envoyer le fichier" : "● Enregistrer";
+}
+/** Minimal .zip (stored, no compression: JPEG pictures are already compressed). */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+async function makeZip(entries) {
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const { name, data } of entries) {
+    const u8 = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : enc.encode(data), nm = enc.encode(name), crc = crc32(u8);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x800, true); h.setUint32(14, crc, true);
+    h.setUint32(18, u8.length, true); h.setUint32(22, u8.length, true); h.setUint16(26, nm.length, true);
+    parts.push(h, nm, u8);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x800, true); c.setUint32(16, crc, true);
+    c.setUint32(20, u8.length, true); c.setUint32(24, u8.length, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    central.push(c, nm);
+    off += 30 + nm.length + u8.length;
+  }
+  const size = central.reduce((a, p) => a + p.byteLength, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, entries.length, true); e.setUint16(10, entries.length, true); e.setUint32(12, size, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, e], { type: "application/zip" });
+}
+$("debugRec").addEventListener("click", async () => {
+  if (rec.file) { // second tap: send it (the share sheet must open straight from a tap on iPhone)
+    const f = rec.file;
+    try {
+      if (isPhone && navigator.canShare?.({ files: [f] })) { await navigator.share({ files: [f], title: f.name }); }
+      else { const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name; document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); toast(`Fichier téléchargé : ${f.name}`); }
+    } catch (e) { if (e?.name === "AbortError") return; console.warn(e); toast("Envoi impossible : réessaie."); return; }
+    rec.file = null; recButton(); return;
+  }
+  if (!rec.on) { Object.assign(rec, { on: true, frames: [], n: 0, t0: performance.now(), snap: null }); recButton(); toast("Enregistrement lancé : présente la carte qui pose problème."); return; }
+  rec.on = false;
+  const frames = rec.frames; rec.frames = [];
+  if (!frames.length) { recButton(); toast("Aucune image enregistrée : lance le scan puis réessaie."); return; }
+  const d = new Date(), p2 = (v) => String(v).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const info = { app: APP_VERSION, device: navigator.userAgent, date: d.toISOString(), game, frames: frames.map((f) => f.meta) };
+  const zip = await makeZip([{ name: "session.json", data: JSON.stringify(info, null, 1) }, ...frames.map((f) => ({ name: `frames/${String(f.meta.i).padStart(3, "0")}.jpg`, data: f.blob }))]);
+  rec.file = new File([zip], `diagnostic-${game}-${stamp}.zip`, { type: "application/zip" });
+  recButton(); toast(`${frames.length} images enregistrées (${Math.max(1, Math.round(zip.size / 1e6))} Mo) : appuie sur « Envoyer le fichier ».`);
+});
+/* ----- replay (computer, from the console): run a recorded frame through the scanner again ----- */
+let replaying = null;
+async function replayFrame(img, meta, passes = 4) {
+  const c = document.createElement("canvas"); c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
+  c.getContext("2d").drawImage(img, 0, 0);
+  Object.defineProperty(c, "videoWidth", { value: c.width }); Object.defineProperty(c, "videoHeight", { value: c.height });
+  const keep = { game, scanning, cam };
+  const out = [];
+  try {
+    if (meta.game && meta.game !== game) await setGameForReplay(meta.game);
+    cam = c; scanning = true;
+    for (let k = 0; k < passes; k++) {
+      replaying = { r: { x: meta.r[0], y: meta.r[1], w: meta.r[2], h: meta.r[3] }, res: null };
+      changed = true; reads = []; last = null;
+      const t0 = performance.now(); await scanFrame();
+      const res = replaying.res;
+      out.push({ ms: Math.round(performance.now() - t0), lines: res ? res.lines.map((l) => l.text) : [], matches: res ? res.matches.map((m) => (m.unsure ? "?" : m.exact ? "" : "~") + m.code) : [] });
+    }
+  } finally { replaying = null; cam = keep.cam; scanning = keep.scanning; if (game !== keep.game) await setGameForReplay(keep.game); }
+  return out;
+}
+async function setGameForReplay(g) { document.querySelector(`#gameMode [data-game="${g}"]`)?.click(); if (GAMES[g]?.file) await ensureGame(g); }
 /** Restart a one-shot CSS animation on an element. */
 function bump(el, cls = "bump") { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
 /** Visual feedback when a card is added: green frame, a ticket flying to the list, counter pop. */
@@ -2039,8 +2143,8 @@ const toBlob = (c, q = 0.92) => new Promise((res) => c.toBlob(res, "image/jpeg",
 function capturePhoto(r = guideInVideo()) {
   const m = 0.05;
   const x = Math.max(0, r.x - r.w * m), y = Math.max(0, r.y - r.h * m);
-  const w = Math.min(video.videoWidth - x, r.w * (1 + 2 * m)), h = Math.min(video.videoHeight - y, r.h * (1 + 2 * m));
-  const full = grab(video, x, y, w, h, 2400);
+  const w = Math.min(cam.videoWidth - x, r.w * (1 + 2 * m)), h = Math.min(cam.videoHeight - y, r.h * (1 + 2 * m));
+  const full = grab(cam, x, y, w, h, 2400);
   // shutter flash, driven by timers so it never stays white
   const snap = $("snap"); snap.style.transition = "none"; snap.style.opacity = "0.85";
   setTimeout(() => { snap.style.transition = "opacity .3s ease-out"; snap.style.opacity = "0"; }, 60);
@@ -2436,6 +2540,6 @@ bindSettings(); renderList(); renderSessionBar(); renderLast(); renderAccount();
 if (!sb) route();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 window.__cs = { // debug helpers
-  enhance, turnedStrip, readCodeStrip, matchAll, matchManual, matchRiftbound, matchOnePiece, matchPokemon, pickByName, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
+  enhance, turnedStrip, readCodeStrip, replayFrame, matchAll, matchManual, matchRiftbound, matchOnePiece, matchPokemon, pickByName, readOnePieceLang, guideInVideo, get EXTRA() { return EXTRA; }, makeItem, get RB() { return RB; }, buildCsv, grab, detectText, recognize, readCodes, celebrate, get items() { return items; }, get DATA() { return DATA; },
   async testStream(s) { stream = s; video.srcObject = s; await video.play(); await getEngine(); scanning = wantScan = true; reads = []; changed = true; loop(); },
 };

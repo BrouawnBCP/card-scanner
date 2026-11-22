@@ -206,6 +206,11 @@ input::placeholder{color:var(--faint)}
 .debug{background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--r-md);padding:10px;display:flex;flex-direction:column;gap:6px}
 .debug canvas{width:100%;height:auto;border-radius:8px;background:#fff}
 .debug pre{margin:0;font:12px/1.4 var(--f-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.debug-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.debug-rec{font:inherit;font-size:12px;font-weight:700;line-height:1.2;padding:6px 11px;min-height:34px;border-radius:999px;border:1px solid rgba(255,107,107,.6);background:rgba(255,107,107,.14);color:#ffd9d9;cursor:pointer;white-space:nowrap}
+.debug-rec.on{background:#e5484d;border-color:#e5484d;color:#fff;animation:recPulse 1.4s ease-in-out infinite}
+.debug-rec.ready{background:#2f9e6e;border-color:#2f9e6e;color:#fff}
+@keyframes recPulse{50%{opacity:.72}}
 
 /* ----- list ----- */
 .list-head{display:flex;align-items:center;gap:8px}

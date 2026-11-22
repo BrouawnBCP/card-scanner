@@ -13,8 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=62">
-<link rel="stylesheet" href="theme-galaxy.css?v=62">
+<link rel="stylesheet" href="style.css?v=63">
+<link rel="stylesheet" href="theme-galaxy.css?v=63">
 </head>
 <body>
 
@@ -184,7 +184,7 @@
       <div class="scan-hint" id="scanHint" role="status" aria-live="polite" hidden></div>
       <div class="vpick" id="pick" hidden></div>
       <div class="debug" id="debug" hidden>
-        <div class="muted small">Diagnostic : ce que lit le scanner</div>
+        <div class="debug-head"><span class="muted small">Diagnostic : ce que lit le scanner</span><button class="debug-rec" id="debugRec" type="button">● Enregistrer</button></div>
         <canvas id="debugCanvas"></canvas>
         <pre id="debugText"></pre>
         <div id="debugEd" hidden>
@@ -449,6 +449,6 @@
 
 <script src="vendor/ort/ort.min.js"></script>
 <script src="vendor/supabase/supabase.js"></script>
-<script type="module" src="app.js?v=62"></script>
+<script type="module" src="app.js?v=63"></script>
 </body>
 </html>
