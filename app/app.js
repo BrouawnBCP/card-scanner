@@ -1320,16 +1320,20 @@ function setRarity(it, rarity) {
   const twin = items.find((x) => x !== it && mergeKey(x) === mergeKey(it));
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
-/** eBay France search on the printed set code (MP20-FR167): finds that exact print and language. */
+/** eBay search on the printed set code (MP20-FR167): finds that exact print and language. */
 const ebayQuery = (it) => gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""} ${LANG_WORD[it.lang] || ""}`.trim() : gameOf(it) === "pk" ? `Pokemon ${(it.lang === "English" ? it.nameEN : it.nameFR) || it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "";
-const ebayLink = (it, extra = "") => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent((ebayQuery(it) + " " + extra).trim())}`;
+/** eBay site matching the card's language (no eBay Portugal: ebay.com); unknown language → ebay.fr. */
+const EBAY_HOST = { French: "www.ebay.fr", English: "www.ebay.com", German: "www.ebay.de", Italian: "www.ebay.it", Spanish: "www.ebay.es", Portuguese: "www.ebay.com" };
+const ebayHost = (it) => EBAY_HOST[it.lang] || "www.ebay.fr";
+const ebayUrl = (host, q) => `https://${host}/sch/i.html?_nkw=${encodeURIComponent(q.trim())}`;
+const ebayLink = (it, extra = "") => ebayUrl(ebayHost(it), ebayQuery(it) + " " + extra);
 /** Graded copies on eBay: the same search + "PSA 10", "BGS 9.5"… (chosen in a small sheet). */
 const GRADERS = { psa: { label: "PSA", word: "PSA", grades: ["10", "9", "8", "7", "6", "5"] }, bgs: { label: "Beckett", word: "BGS", grades: ["10", "9.5", "9", "8.5", "8", "7"] } };
-const gradedBtns = (it) => Object.entries(GRADERS).map(([k, g]) => `<button type="button" class="brand-btn grade-btn ${k}" data-grader="${k}" data-q="${esc(ebayQuery(it))}" aria-label="Rechercher les cartes gradées ${g.label} sur eBay" title="Gradées ${g.label} sur eBay">${k === "psa" ? "PSA" : "BGS"}</button>`).join("");
+const gradedBtns = (it) => Object.entries(GRADERS).map(([k, g]) => `<button type="button" class="brand-btn grade-btn ${k}" data-grader="${k}" data-q="${esc(ebayQuery(it))}" data-host="${ebayHost(it)}" aria-label="Rechercher les cartes gradées ${g.label} sur eBay" title="Gradées ${g.label} sur eBay">${k === "psa" ? "PSA" : "BGS"}</button>`).join("");
 document.addEventListener("click", (e) => {
   const b = e.target.closest?.("[data-grader]"); if (!b) return;
   e.preventDefault(); e.stopPropagation();
-  const g = GRADERS[b.dataset.grader], q = b.dataset.q, url = (x) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(`${q} ${x}`.trim())}`;
+  const g = GRADERS[b.dataset.grader], q = b.dataset.q, url = (x) => ebayUrl(b.dataset.host || "www.ebay.fr", `${q} ${x}`);
   openBulk(`${g.label} sur eBay`, `<p class="muted small">${esc(q)}</p><div class="chips big">${g.grades.map((n) => `<a class="chip" href="${url(`${g.word} ${n}`)}" target="_blank" rel="noopener">${g.word} ${n}</a>`).join("")}<a class="chip" href="${url(g.word)}" target="_blank" rel="noopener">Toutes notes</a></div>`);
 }, true);
 /** Cardmarket and eBay logo buttons. */
