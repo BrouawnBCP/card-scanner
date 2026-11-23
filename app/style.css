@@ -544,6 +544,7 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 @media (prefers-reduced-motion:reduce){#view-scan .stage.live .scanline{animation:none;transform:translateY(50%)}}
 /* version picker shown on the camera when a code has several versions */
 .vpick{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(3,4,10,.55)}
+.vpick.photo-src{position:fixed;z-index:60}
 .pick-card{width:100%;max-width:340px;max-height:100%;overflow:auto;background:#0b0e1f;border:1px solid rgba(120,170,255,.28);border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:10px;box-shadow:0 18px 50px rgba(0,0,0,.55);animation:rise .22s ease-out}
 .pick-title{margin:0;font-weight:750;font-size:16px}
 .pick-name{margin:0;font-size:13px;color:var(--muted);line-height:1.35}

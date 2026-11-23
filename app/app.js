@@ -2463,7 +2463,22 @@ async function attachPhoto(full, it, itemId, sess = current) {
 $("galleryBtn").addEventListener("click", () => showView("photos"));
 /** Own picture of a sealed product (camera or gallery): stored on this phone, shown first in the list. */
 function pickOwnPhoto(it, sess = current) {
+  // Recent Android shows only the photo picker for accept="image/*" (no camera): ask first, then use capture for the camera.
+  const ov = document.createElement("div"); ov.className = "vpick photo-src";
+  ov.innerHTML = `<div class="pick-card" role="dialog" aria-label="Ajouter une photo">
+    <p class="pick-title">Ajouter une photo</p>
+    <div class="pick-list"><button type="button" class="pick-opt" data-src="cam">${ico("camera")}<span class="pick-rar">Prendre une photo</span></button>
+    <button type="button" class="pick-opt" data-src="gal">${ico("image")}<span class="pick-rar">Choisir dans la galerie</span></button></div>
+    <button type="button" class="pick-later" data-src="no">Annuler</button></div>`;
+  ov.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-src]"); if (!b && e.target !== ov) return;
+    ov.remove(); if (b && b.dataset.src !== "no") openOwnPhotoInput(it, sess, b.dataset.src === "cam");
+  });
+  document.body.appendChild(ov);
+}
+function openOwnPhotoInput(it, sess, camera) {
   const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+  if (camera) inp.setAttribute("capture", "environment");
   inp.addEventListener("change", async () => {
     const f = inp.files?.[0]; if (!f) return;
     try {
