@@ -206,6 +206,14 @@
       <div class="suggest" id="suggest" hidden></div>
     </details>
 
+    <details class="manual-wrap" id="sealedWrap" hidden>
+      <summary><svg class="ico sm"><use href="#i-stack"/></svg> <span id="sealedSummary">Ajouter un produit scellé</span></summary>
+      <form class="manual" id="sealedForm" autocomplete="off">
+        <input id="sealedQuery" placeholder="Ex. display règne de glace, ETB 151" aria-label="Rechercher un produit scellé" autocapitalize="off" spellcheck="false">
+      </form>
+      <div class="suggest" id="sealedSuggest" hidden></div>
+    </details>
+
   </section>
 
   <!-- ===== Liste ===== -->
@@ -228,6 +236,7 @@
         <button class="icon-btn sm" id="renameBtn" type="button" aria-label="Renommer la session" title="Renommer"><svg class="ico sm"><use href="#i-pencil"/></svg></button>
       </div>
       <h1 class="title-input static" id="collTitle" hidden>Ma collection</h1>
+      <button class="btn small" id="addSealedBtn" type="button" aria-label="Ajouter un item scellé"><svg class="ico sm"><use href="#i-plus"/></svg> <span>Item scellé</span></button>
       <button class="btn small" id="selectBtn" type="button"><svg class="ico sm"><use href="#i-check"/></svg> <span>Sélectionner</span></button>
     </header>
     <p class="muted small session-dates" id="sessionDates"></p>

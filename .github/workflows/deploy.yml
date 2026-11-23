@@ -44,6 +44,11 @@ jobs:
           python tools/build_pokemon.py --out app/data/pokemon.json || \
             curl -fsSL "https://brouawnbcp.github.io/card-scanner/data/pokemon.json" -o app/data/pokemon.json || \
             echo "Base Pokémon indisponible ce soir"
+      - name: Construire la base des produits scellés (Pokémon, One Piece)
+        run: |
+          python tools/build_sealed.py || \
+            { for g in pk op; do curl -fsSL "https://brouawnbcp.github.io/card-scanner/data/sealed_$g.json" -o app/data/sealed_$g.json; done; } || \
+            echo "Base des produits scellés indisponible ce soir"
 
       # Les vignettes sont stockées sur une branche à part : chaque image n'est téléchargée
       # qu'une seule fois chez YGOPRODeck, comme ils le demandent.

@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "66";
+const APP_VERSION = "67";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -133,8 +133,75 @@ async function loadData() {
     setStatus("La base de cartes n'a pas pu être chargée. Vérifie ta connexion puis relance l'appli.");
   }
 }
+/* ----- sealed products (displays, coffrets, boosters…), Pokémon and One Piece: added by a search (data/sealed_<game>.json) -----
+   Item: {sealed: type, key: "S"+idProduct, cm: idProduct, rarity: "Scellé", set: expansion, code: set code (One Piece), logo} */
+const SEALED_GAMES = ["pk", "op"];
+const SEALED = {}, sealedLoading = {};
+// type → [French label, short badge, search words]
+const SEALED_TYPES = {
+  display: ["Display", "DISP", "display booster box boite"], etb: ["Coffret Dresseur d'Élite", "ETB", "etb coffret dresseur elite trainer box"],
+  bundle: ["Bundle", "BNDL", "bundle"], case: ["Carton", "CART", "carton case"], upc: ["Coffret Ultra-Premium", "UPC", "upc coffret ultra premium collection"],
+  bnb: ["Kit d'Avant-Première", "AVP", "avant premiere build battle"], tin: ["Pokébox", "TIN", "tin pokebox boite metal"],
+  blister: ["Blister", "BLIS", "blister tripack"], deck: ["Deck", "DECK", "deck starter structure"], booster: ["Booster", "BOOS", "booster pack"],
+  box: ["Coffret", "COFF", "coffret collection box"], other: ["Produit", "—", ""],
+};
+const isSealed = (it) => !!it?.sealed;
+const sealedFold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]+/g, " ").trim();
+function ensureSealed(g) {
+  if (!SEALED_GAMES.includes(g)) return null;
+  if (!SEALED[g] && !sealedLoading[g]) sealedLoading[g] = (async () => {
+    try {
+      const D = await (await fetch(`data/sealed_${g}.json`)).json();
+      D.index = D.items.map((r) => { const x = D.exps[r[4]]; return " " + sealedFold([r[1], r[2], SEALED_TYPES[r[3]]?.[2], x?.[0], x?.[1], g === "op" && x ? x[2] + " " + x[2].replace("-", "") : ""].join(" ")) + " "; });
+      SEALED[g] = D; renderList(); renderLast();
+      if ($("sealedQuery").value) suggestSealed($("sealedQuery").value);
+    } catch (e) { console.warn("sealed data unavailable", e); sealedLoading[g] = null; }
+  })();
+  return sealedLoading[g];
+}
+/** Products whose names hold every word typed (French or English), main products (displays, ETB…) first. */
+function searchSealed(g, q) {
+  const D = SEALED[g], words = sealedFold(q).split(" ").filter(Boolean); if (!D || !words.length) return [];
+  const rank = { display: 0, etb: 0, upc: 1, bundle: 1, box: 2, tin: 2, bnb: 2, deck: 2, booster: 3, blister: 3, case: 4, other: 5 };
+  const hits = [];
+  for (let i = 0; i < D.items.length && hits.length < 400; i++) {
+    const t = D.index[i];
+    if (words.every((w) => t.includes(" " + w) || (w.length > 2 && t.includes(w)))) hits.push(i);
+  }
+  // items are stored newest first: keep that order of expansions inside each rank, the plain product (shortest name) first
+  const first = new Map(); for (const i of hits) { const x = D.items[i][4]; if (!first.has(x)) first.set(x, i); }
+  const key = (i) => [rank[D.items[i][3]], D.items[i][4] < 0 ? i : first.get(D.items[i][4]), D.items[i][1].length, i];
+  return hits.sort((a, b) => { const p = key(a), q = key(b); for (let k = 0; k < 4; k++) if (p[k] !== q[k]) return p[k] - q[k]; return 0; }).slice(0, 30);
+}
+const sealedLogo = (it) => {
+  if (it.logo) return `<img class="logo" src="https://assets.tcgdex.net/${it.lang === "French" ? "fr" : "en"}/${esc(it.logo)}/logo.webp" data-alt="https://assets.tcgdex.net/en/${esc(it.logo)}/logo.webp" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.alt&&this.src!==this.dataset.alt){this.src=this.dataset.alt;this.dataset.alt=''}else this.remove()">`;
+  return it.code ? `<span class="set-code">${esc(it.code)}</span>` : "";
+};
+const sealedBadge = (it) => `<span class="rar r-sealed" title="${esc(SEALED_TYPES[it.sealed]?.[0] || "Scellé")}">${esc(SEALED_TYPES[it.sealed]?.[1] || "—")}</span>`;
+function makeSealed(g, i) {
+  const D = SEALED[g], [id, en, fr, type, xi] = D.items[i], x = D.exps[xi];
+  return {
+    id: uid(), createdAt: Date.now(), game: g, sealed: type, key: "S" + id, cm: id, code: g === "op" && x ? x[2] : "", prefix: "", cn: "",
+    nameEN: en, nameFR: fr || en, set: x ? x[1] || x[0] : SEALED_TYPES[type]?.[0] || "", logo: g === "pk" && x ? x[2] : "",
+    rarity: "Scellé", lang: settings.lang, firstEd: false, condition: settings.cond, comment: settings.comment, qty: 1, price: "", cands: [],
+  };
+}
+function suggestSealed(q, g = game, box = $("sealedSuggest")) {
+  const D = SEALED[g];
+  if (!q.trim()) { box.hidden = true; box.innerHTML = ""; return; }
+  if (!D) { ensureSealed(g)?.then(() => box.isConnected && suggestSealed(q, g, box)); box.innerHTML = `<p class="muted small sug-empty">Chargement des produits…</p>`; box.hidden = false; return; }
+  const hits = searchSealed(g, q);
+  box.innerHTML = hits.length ? hits.map((i) => {
+    const it = makeSealed(g, i), p = cmPrice(it.cm);
+    return `<button type="button" class="sug" data-sealed="${i}" data-sg="${g}"><span class="thumb sm sealed-th">${sealedLogo(it)}</span>
+      <span class="row-text"><span class="name">${esc(it.nameFR)}</span><span class="meta">${esc(SEALED_TYPES[it.sealed]?.[0] || "")}${it.nameFR !== it.nameEN ? " · " + esc(it.nameEN) : ""}</span></span>
+      <span class="muted small">${p ? esc(pricePlain(p)) : ""}</span></button>`;
+  }).join("") : `<p class="muted small sug-empty">Aucun produit trouvé pour « ${esc(q)} ».</p>`;
+  box.hidden = false;
+}
+
 /** Cardmarket price guide row of a product: [trend, low ("De"), avg7, avg1] (avg1 missing in data built before v50). */
-const priceRow = (i) => DATA?.prices[i] ?? Object.values(EXTRA).reduce((v, D) => v ?? D?.prices[i], undefined);
+const priceRow = (i) => DATA?.prices[i] ?? Object.values(EXTRA).reduce((v, D) => v ?? D?.prices[i], undefined) ?? Object.values(SEALED).reduce((v, D) => v ?? D?.prices[i], undefined);
 /** Price shown for a card: Cardmarket's 1-day average; the trend when no sale was recorded that day. */
 const shownPrice = (row) => (row ? row[3] ?? row[0] : null);
 function cmPrice(cm) {
@@ -1321,7 +1388,7 @@ function setRarity(it, rarity) {
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
 /** eBay search on the printed set code (MP20-FR167): finds that exact print and language. */
-const ebayQuery = (it) => gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""} ${LANG_WORD[it.lang] || ""}`.trim() : gameOf(it) === "pk" ? `Pokemon ${(it.lang === "English" ? it.nameEN : it.nameFR) || it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "";
+const ebayQuery = (it) => isSealed(it) ? `${gameOf(it) === "pk" ? "Pokemon" : "One Piece"} ${(it.lang === "French" ? it.nameFR : it.nameEN) || it.nameEN || ""}`.replace(/\s*\((?:V\.\d+|\d+ (?:Boosters?|Cards?|cartes|boosters))\)/gi, "").trim() : gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""} ${LANG_WORD[it.lang] || ""}`.trim() : gameOf(it) === "pk" ? `Pokemon ${(it.lang === "English" ? it.nameEN : it.nameFR) || it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "";
 /** eBay site matching the card's language (no eBay Portugal: ebay.com); unknown language → ebay.fr. */
 const EBAY_HOST = { French: "www.ebay.fr", English: "www.ebay.com", German: "www.ebay.de", Italian: "www.ebay.it", Spanish: "www.ebay.es", Portuguese: "www.ebay.com" };
 const ebayHost = (it) => EBAY_HOST[it.lang] || "www.ebay.fr";
@@ -1339,7 +1406,7 @@ document.addEventListener("click", (e) => {
 /** Cardmarket and eBay logo buttons. */
 const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
   + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`
-  + gradedBtns(it)
+  + (isSealed(it) ? "" : gradedBtns(it))
   + `<a class="brand-btn vinted" href="${vintedLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.nameFR || it.nameEN)} sur Vinted" title="Rechercher sur Vinted"><img src="icons/brands/vinted.png" alt="" width="24" height="24"></a>`;
 /** Vinted France search on the card's name (sellers rarely write the set code there). */
 /** One Piece: the card's language is added to the eBay and Vinted searches ("Français", "English"…). */
@@ -1347,7 +1414,7 @@ const LANG_WORD = { French: "Français", English: "English", German: "Deutsch", 
 /** Vinted: name + printed code ("Galant Granite MP20-FR167", "Kumacy OP14-102"); Riftbound: name only. */
 const vintedLink = (it) => {
   const g = gameOf(it), name = String(it.nameFR || it.nameEN || "").replace(/^"+|"+$/g, "");
-  const q = [name, g !== "rb" ? it.code : ""].filter(Boolean).join(" ");
+  const q = isSealed(it) ? ebayQuery({ ...it, lang: "French" }) : [name, g !== "rb" ? it.code : ""].filter(Boolean).join(" ");
   return `https://www.vinted.fr/catalog?search_text=${encodeURIComponent(q)}`;
 };
 // Cardmarket language ids (offer filter "language=").
@@ -1460,6 +1527,11 @@ function rbImg(it) {
 }
 const thumb = (it, big = false) => {
   const ph = itemPhoto(it);
+  if (isSealed(it)) {
+    if (!SEALED[gameOf(it)]) ensureSealed(gameOf(it)); // prices of the products
+    return ph ? `<span class="thumb ${big ? "lg" : ""} has-photo"><img src="${blobUrl(ph)}" alt="">${sealedBadge(it)}</span>`
+      : `<span class="thumb ${big ? "lg" : ""} sealed-th">${sealedLogo(it)}${sealedBadge(it)}</span>`;
+  }
   if (!ph && gameOf(it) !== "ygo") { const u = rbImg(it); return `<span class="thumb ${big ? "lg" : ""}">${u ? `<img src="${esc(u)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}${rarBadge(it.rarity)}</span>`; }
   if (ph) return `<span class="thumb ${big ? "lg" : ""} has-photo"><img src="${blobUrl(ph)}" alt="">${rarBadge(it.rarity)}<span class="cam-badge">${ico("camera")}${it.photos.length > 1 ? it.photos.length : ""}</span></span>`;
   const id = cardImgId(it);
@@ -1477,9 +1549,9 @@ function renderLast() {
     <div class="last-top">
       ${thumb(it, true)}
       <div class="last-main">
-        <span class="eyebrow">Dernière carte${it.qty > 1 ? ` · ×${it.qty}` : ""}</span>
+        <span class="eyebrow">${isSealed(it) ? "Dernier ajout" : "Dernière carte"}${it.qty > 1 ? ` · ×${it.qty}` : ""}</span>
         <span class="name">${esc(it.nameFR)}</span>
-        <span class="meta"><span class="code">${esc(it.code)}</span><span class="last-set"> · ${esc(it.set)}</span></span>
+        <span class="meta">${isSealed(it) ? metaHtml(it) : `<span class="code">${esc(it.code)}</span><span class="last-set"> · ${esc(it.set)}</span>`}</span>
         ${(() => { const s = stockOf(it); return s ? `<span class="stock-pill">${ico("stack")} Déjà ${s.n} en stock${s.lang && s.lang !== s.n ? ` (${s.lang} ${LANG_SHORT[it.lang] || ""})` : ""}</span>` : ""; })()}
       </div>
       ${priceHtml(it)}
@@ -1675,18 +1747,41 @@ function renderList() {
         ${thumb(it)}
         <span class="row-text">
           <span class="name">${esc(it.nameFR)}</span>
-          <span class="meta"><span class="code">${esc(it.code)}</span> · ${esc(it.set)}</span>
+          <span class="meta">${metaHtml(it)}</span>
         </span>
         <span class="row-side">
           ${priceHtml(it)}
-          <span class="tags">${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}${stockTag(it)}${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span>${coll ? "" : `<span class="tag">${esc(it.condition)}</span>`}</span>
+          <span class="tags">${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}${stockTag(it)}${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span>${coll || isSealed(it) ? "" : `<span class="tag">${esc(it.condition)}</span>`}</span>
         </span>
       </button>
       ${open ? (coll ? collDetail(it) : editPanel(it)) : ""}
     </div>`;
   }).join("");
 }
+/** Second line of a row: "MP20-FR167 · set", or for a sealed product "Display · Règne de Glace". */
+const metaHtml = (it) => isSealed(it)
+  ? `${esc(SEALED_TYPES[it.sealed]?.[0] || "Scellé")}${it.set && it.set !== SEALED_TYPES[it.sealed]?.[0] && it.set !== it.code.replace("-", "") ? ` · ${esc(it.set)}` : ""}${it.code ? ` · <span class="code">${esc(it.code)}</span>` : ""}`
+  : `<span class="code">${esc(it.code)}</span> · ${esc(it.set)}`;
+/** Sealed product: language, price, comment, own photo (shown in the list instead of the expansion logo). */
+function sealedPanel(it) {
+  return `<div class="edit">
+    <label>Langue<select data-f="lang">${LANGS.map((l) => `<option value="${l}" ${l === it.lang ? "selected" : ""}>${LANG_SHORT[l]}</option>`).join("")}</select></label>
+    <label>Prix de vente<input data-f="price" inputmode="decimal" placeholder="€" value="${esc(it.price)}"></label>
+    <label class="full">Commentaire<input data-f="comment" placeholder="—" value="${esc(it.comment)}"></label>
+    ${it.nameFR !== it.nameEN ? `<p class="full muted small">Cardmarket : ${esc(it.nameEN)}</p>` : ""}
+    ${photoStrip(it)}
+    ${marketLine(it)}
+    <p class="full muted small scanned">Ajouté le ${new Date(it.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} à ${new Date(it.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
+    <div class="edit-row full">
+      <span class="qty"><button data-act="minus" aria-label="Retirer un exemplaire">${ico("minus")}</button><span>${it.qty}</span><button data-act="plus" aria-label="Ajouter un exemplaire">${ico("plus")}</button></span>
+      <button class="chip" data-act="ownphoto" aria-label="Ajouter ta photo du produit">${ico("camera")} Photo</button>
+      ${marketLinks(it)}
+      <button class="del" data-act="del" aria-label="Supprimer">${ico("trash")}</button>
+    </div>
+  </div>`;
+}
 function editPanel(it) {
+  if (isSealed(it)) return sealedPanel(it);
   return `<div class="edit">
     ${it.cands.length > 1 ? `<label class="full">Rareté<select data-f="rarity">${it.rarity ? "" : `<option value="">À choisir…</option>`}${it.cands.map((c) => `<option ${c.rarity === it.rarity ? "selected" : ""}>${esc(c.rarity)}</option>`).join("")}</select></label>` : ""}
     <label>État<select data-f="condition">${COND.map((c) => `<option ${c === it.condition ? "selected" : ""}>${c}</option>`).join("")}</select></label>
@@ -1730,6 +1825,7 @@ $("list").addEventListener("click", (e) => {
   if (a === "photo") { openViewer(photoCache.findIndex((p) => p.id === b.dataset.photo)); return; }
   if (a === "opensession") { const s = sessions.find((x) => x.id === b.dataset.sid); if (s) { switchSession(s); setListMode("session"); toast(`Session « ${s.name} » ouverte`); } return; }
   const it = itemOf(b); if (!it) return;
+  if (a === "ownphoto") { pickOwnPhoto(it); return; }
   if (a === "plus") it.qty += 1;
   else if (a === "minus") { if (it.qty <= 1) return; it.qty -= 1; }
   else if (a === "ed") it.firstEd = !it.firstEd;
@@ -2059,7 +2155,7 @@ function buildCsv(list = listSource()) {
   }
   const lines = [HEAD.map(q).join(",")];
   for (const { it, id, price, qty } of rows.values())
-    lines.push([id, qty, it.nameEN, it.set, it.prefix, it.cn, it.condition, it.lang, it.firstEd ? "true" : "", "", price, it.comment, "", "", it.nameFR, "", it.rarity, ""].map(q).join(","));
+    lines.push([id, qty, it.nameEN, it.set, it.prefix, it.cn, it.condition, it.lang, it.firstEd ? "true" : "", "", price, it.comment, "", "", it.nameFR, "", isSealed(it) ? "" : it.rarity, ""].map(q).join(","));
   return { csv: lines.join("\r\n") + "\r\n", count: rows.size };
 }
 $("exportBtn").addEventListener("click", async () => {
@@ -2185,6 +2281,10 @@ $("startBtn").addEventListener("click", () => {
 function renderGame() {
   $("gameMode").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b.dataset.game === game));
   $("manualCode").placeholder = game === "rb" ? "Code, ex. VEN-136a" : game === "op" ? "Code, ex. OP12-118" : game === "pk" ? "Numéro, ex. 21/149 ou PBL 071" : "Code ou nom de carte";
+  $("sealedWrap").hidden = !SEALED_GAMES.includes(game);
+  $("sealedSummary").textContent = `Ajouter un produit scellé ${GAME_NAME[game] || ""}`;
+  $("sealedQuery").placeholder = game === "op" ? "Ex. display OP-05, starter deck" : "Ex. display règne de glace, ETB 151";
+  if (SEALED_GAMES.includes(game) && $("sealedWrap").open) ensureSealed(game);
   ensureGame(game);
 }
 $("gameMode").addEventListener("click", (e) => {
@@ -2255,6 +2355,23 @@ async function attachPhoto(full, it, itemId) {
   } catch (e) { console.warn(e); toast("Photo non enregistrée (mémoire du téléphone pleine ?)"); }
 }
 $("galleryBtn").addEventListener("click", () => showView("photos"));
+/** Own picture of a sealed product (camera or gallery): stored on this phone, shown first in the list. */
+function pickOwnPhoto(it) {
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+  inp.addEventListener("change", async () => {
+    const f = inp.files?.[0]; if (!f) return;
+    try {
+      const bmp = await createImageBitmap(f, { imageOrientation: "from-image" });
+      const full = grab(bmp, 0, 0, bmp.width, bmp.height, 1600); bmp.close?.();
+      const before = it.photos || [];
+      await attachPhoto(full, it, it.id);
+      const line = items.find((x) => x.id === it.id);
+      if (line?.photos?.length > before.length) { const id = line.photos[line.photos.length - 1]; line.photos = [id, ...before]; saveItems(); renderLast(); }
+      toast("Photo ajoutée");
+    } catch (e) { console.warn(e); toast("Cette image n'a pas pu être lue"); }
+  });
+  inp.click();
+}
 
 /* ----- "Mes photos" ----- */
 let photoSelecting = false; const photoSel = new Set(); let viewerIdx = -1;
@@ -2412,6 +2529,49 @@ $("manualForm").addEventListener("submit", (e) => {
   if (hits.length === 1) return suggestPrints(hits[0]);
   if (hits.length) return suggestCards(v);
   toast("Ni code ni nom reconnu. Exemple : MP20-FR167 ou Galant Granite");
+});
+let sealedT;
+$("sealedWrap").addEventListener("toggle", () => { if ($("sealedWrap").open) { ensureSealed(game); $("sealedQuery").focus(); } });
+$("sealedQuery").addEventListener("input", (e) => { clearTimeout(sealedT); sealedT = setTimeout(() => suggestSealed(e.target.value), 150); });
+$("sealedForm").addEventListener("submit", (e) => { e.preventDefault(); clearTimeout(sealedT); suggestSealed($("sealedQuery").value); $("sealedQuery").blur(); });
+$("sealedSuggest").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-sealed]"); if (!b || !SEALED[game]) return;
+  const it = makeSealed(game, Number(b.dataset.sealed));
+  $("sealedQuery").value = ""; $("sealedSuggest").hidden = true; $("sealedSuggest").innerHTML = "";
+  commit(it, "manual");
+});
+/* "+ Item scellé" in the list: search sheet, the product goes to the current session (and so to the collection) */
+let sheetGame = "pk";
+function openSealedSheet() {
+  sheetGame = SEALED_GAMES.includes(listGame) ? listGame : SEALED_GAMES.includes(game) ? game : sheetGame;
+  openBulk("Ajouter un item scellé", `
+    <div class="segmented" id="sealedGames" role="tablist">${SEALED_GAMES.map((g) => `<button type="button" class="seg ${g === sheetGame ? "on" : ""}" data-sgame="${g}">${GAME_NAME[g]}</button>`).join("")}</div>
+    <form class="manual" id="sheetSealedForm" autocomplete="off"><input id="sheetSealedQuery" type="search" placeholder="Ex. display règne de glace, ETB 151" aria-label="Rechercher un produit scellé" autocapitalize="off" spellcheck="false"></form>
+    <p class="muted small">Ajouté à la session « ${esc(current.name)} », donc à ta collection.</p>
+    <div class="suggest" id="sheetSealedSuggest" hidden></div>`);
+  ensureSealed(sheetGame);
+  setTimeout(() => $("sheetSealedQuery")?.focus(), 50);
+}
+$("addSealedBtn").addEventListener("click", openSealedSheet);
+$("bulkBody").addEventListener("input", (e) => {
+  if (e.target.id !== "sheetSealedQuery") return;
+  clearTimeout(sealedT); sealedT = setTimeout(() => suggestSealed(e.target.value, sheetGame, $("sheetSealedSuggest")), 150);
+});
+$("bulkBody").addEventListener("submit", (e) => { if (e.target.id === "sheetSealedForm") { e.preventDefault(); $("sheetSealedQuery").blur(); } });
+$("bulkBody").addEventListener("click", (e) => {
+  const sg = e.target.closest("[data-sgame]");
+  if (sg) {
+    sheetGame = sg.dataset.sgame; ensureSealed(sheetGame);
+    $("sealedGames").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b === sg));
+    $("sheetSealedQuery").placeholder = sheetGame === "op" ? "Ex. display OP-05, starter deck" : "Ex. display règne de glace, ETB 151";
+    suggestSealed($("sheetSealedQuery").value, sheetGame, $("sheetSealedSuggest")); return;
+  }
+  const b = e.target.closest("[data-sealed]"); if (!b || !SEALED[b.dataset.sg]) return;
+  const it = makeSealed(b.dataset.sg, Number(b.dataset.sealed));
+  closeBulk();
+  if (listMode === "history") setListMode("session");
+  commit(it, "manual");
+  openId = lastAdded?.id || null; renderList();
 });
 let toastT;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2800); }
