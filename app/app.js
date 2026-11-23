@@ -1400,20 +1400,40 @@ const ebayQuery = (it) => isSealed(it) ? `${gameOf(it) === "pk" ? "Pokemon" : "O
 /** eBay site matching the card's language (no eBay Portugal: ebay.com); unknown language → ebay.fr. */
 const EBAY_HOST = { French: "www.ebay.fr", English: "www.ebay.com", German: "www.ebay.de", Italian: "www.ebay.it", Spanish: "www.ebay.es", Portuguese: "www.ebay.com" };
 const ebayHost = (it) => EBAY_HOST[it.lang] || "www.ebay.fr";
-const ebayUrl = (host, q) => `https://${host}/sch/i.html?_nkw=${encodeURIComponent(q.trim())}`;
+/** sold = true: "Ventes réussies" filter ticked (LH_Sold + LH_Complete). */
+const ebayUrl = (host, q, sold = false) => `https://${host}/sch/i.html?_nkw=${encodeURIComponent(q.trim())}${sold ? "&LH_Sold=1&LH_Complete=1" : ""}`;
 const ebayLink = (it, extra = "") => ebayUrl(ebayHost(it), ebayQuery(it) + " " + extra);
 /** Graded copies on eBay: the same search + "PSA 10", "BGS 9.5"… (chosen in a small sheet). */
 const GRADERS = { psa: { label: "PSA", word: "PSA", grades: ["10", "9", "8", "7", "6", "5"] }, bgs: { label: "Beckett", word: "BGS", grades: ["10", "9.5", "9", "8.5", "8", "7"] } };
 const gradedBtns = (it) => Object.entries(GRADERS).map(([k, g]) => `<button type="button" class="brand-btn grade-btn ${k}" data-grader="${k}" data-q="${esc(ebayQuery(it))}" data-host="${ebayHost(it)}" aria-label="Rechercher les cartes gradées ${g.label} sur eBay" title="Gradées ${g.label} sur eBay">${k === "psa" ? "PSA" : "BGS"}</button>`).join("");
+/** Search mode in the eBay / PSA / BGS sheets: normal listings or sold items (remembered while the app is open). */
+let ebaySold = false;
+const ebayModeChips = () => `<div class="chips ebay-mode"><button type="button" class="chip${ebaySold ? "" : " on"}" data-ebay-mode="0">Recherche normale</button><button type="button" class="chip${ebaySold ? " on" : ""}" data-ebay-mode="1">Ventes réussies</button></div>`;
 document.addEventListener("click", (e) => {
-  const b = e.target.closest?.("[data-grader]"); if (!b) return;
+  const m = e.target.closest?.("[data-ebay-mode]");
+  if (m) {
+    e.preventDefault(); e.stopPropagation();
+    ebaySold = m.dataset.ebayMode === "1";
+    const body = $("bulkBody");
+    body.querySelectorAll("[data-ebay-mode]").forEach((c) => c.classList.toggle("on", c === m));
+    body.querySelectorAll("a[data-ebay-q]").forEach((a) => { a.href = ebayUrl(a.dataset.host, a.dataset.ebayQ, ebaySold); });
+    return;
+  }
+  const b = e.target.closest?.("[data-grader], [data-ebay]"); if (!b) return;
   e.preventDefault(); e.stopPropagation();
-  const g = GRADERS[b.dataset.grader], q = b.dataset.q, url = (x) => ebayUrl(b.dataset.host || "www.ebay.fr", `${q} ${x}`);
-  openBulk(`${g.label} sur eBay`, `<p class="muted small">${esc(q)}</p><div class="chips big">${g.grades.map((n) => `<a class="chip" href="${url(`${g.word} ${n}`)}" target="_blank" rel="noopener">${g.word} ${n}</a>`).join("")}<a class="chip" href="${url(g.word)}" target="_blank" rel="noopener">Toutes notes</a></div>`);
+  const q = b.dataset.q, host = b.dataset.host || "www.ebay.fr";
+  const link = (x, label) => { const qq = `${q} ${x}`.trim(); return `<a class="chip" href="${ebayUrl(host, qq, ebaySold)}" data-ebay-q="${esc(qq)}" data-host="${host}" target="_blank" rel="noopener">${label}</a>`; };
+  if (b.dataset.ebay != null) {
+    // eBay logo: choose between a normal search and sold items, opened directly.
+    openBulk("eBay", `<p class="muted small">${esc(q)}</p><div class="chips big"><a class="chip" href="${ebayUrl(host, q)}" target="_blank" rel="noopener">Recherche normale</a><a class="chip" href="${ebayUrl(host, q, true)}" target="_blank" rel="noopener">Ventes réussies</a></div>`);
+    return;
+  }
+  const g = GRADERS[b.dataset.grader];
+  openBulk(`${g.label} sur eBay`, `<p class="muted small">${esc(q)}</p>${ebayModeChips()}<div class="chips big">${g.grades.map((n) => link(`${g.word} ${n}`, `${g.word} ${n}`)).join("")}${link(g.word, "Toutes notes")}</div>`);
 }, true);
 /** Cardmarket and eBay logo buttons. */
 const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
-  + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`
+  + `<button type="button" class="brand-btn" data-ebay data-q="${esc(ebayQuery(it))}" data-host="${ebayHost(it)}" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></button>`
   + (isSealed(it) ? "" : gradedBtns(it))
   + `<a class="brand-btn vinted" href="${vintedLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.nameFR || it.nameEN)} sur Vinted" title="Rechercher sur Vinted"><img src="icons/brands/vinted.png" alt="" width="24" height="24"></a>`;
 /** Vinted France search on the card's name (sellers rarely write the set code there). */
