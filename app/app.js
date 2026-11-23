@@ -1823,7 +1823,7 @@ $("list").addEventListener("click", (e) => {
   if (a === "toggle") { openId = openId === rowId ? null : rowId; renderList(); return; }
   if (a === "pick") { selected.has(rowId) ? selected.delete(rowId) : selected.add(rowId); renderList(); return; }
   if (a === "photo") { openViewer(photoCache.findIndex((p) => p.id === b.dataset.photo)); return; }
-  if (a === "opensession") { const s = sessions.find((x) => x.id === b.dataset.sid); if (s) { switchSession(s); setListMode("session"); toast(`Session « ${s.name} » ouverte`); } return; }
+  if (a === "opensession") { const s = sessions.find((x) => x.id === b.dataset.sid); if (s) { openCardInSession(s, rowId.slice(4)); toast(`Session « ${s.name} » ouverte`); } return; }
   const it = itemOf(b); if (!it) return;
   if (a === "ownphoto") { pickOwnPhoto(it); return; }
   if (a === "plus") it.qty += 1;
@@ -1845,12 +1845,40 @@ $("listSort").addEventListener("change", (e) => { sortBy = e.target.value; showM
 $("listFilter").addEventListener("change", (e) => { filter = e.target.value; showMax = PAGE; renderList(); });
 $("moreBtn").addEventListener("click", () => { showMax += PAGE; renderList(); });
 $("statTodoBox").addEventListener("click", () => { filter = filter === "todo" ? "all" : "todo"; $("listFilter").value = filter; renderList(); });
+const LIST_MODE_NAMES = { session: "Session", collection: "Ma Collection", history: "Historique" };
 function setListMode(m) {
   listMode = m; openId = null; selecting = false; selected.clear(); showMax = PAGE;
-  $("listMode").querySelectorAll(".seg").forEach((s) => s.classList.toggle("on", s.dataset.mode === m));
+  setListHub(false); $("listModeName").textContent = LIST_MODE_NAMES[m] || "";
   renderList(); window.scrollTo(0, 0);
 }
-$("listMode").addEventListener("click", (e) => { const b = e.target.closest("[data-mode]"); if (b) setListMode(b.dataset.mode); });
+/** "Liste" page: 3 big buttons (Sessions / Ma Collection / Historique) before the list itself. */
+function setListHub(on) {
+  $("view-list").classList.toggle("hub", on);
+  if (on) {
+    selecting = false; selected.clear(); renderBulkBar();
+    const n = items.reduce((t, x) => t + x.qty, 0), coll = collection().reduce((t, x) => t + x.qty, 0);
+    $("hubSessionSub").textContent = `« ${current.name} » · ${n} carte${n > 1 ? "s" : ""}`;
+    $("hubCollSub").textContent = `${coll} carte${coll > 1 ? "s" : ""} au total`;
+    $("hubHistSub").textContent = `${sessions.length} session${sessions.length > 1 ? "s" : ""}`;
+    window.scrollTo(0, 0);
+  }
+}
+$("listHub").addEventListener("click", (e) => { const b = e.target.closest("[data-mode]"); if (b) setListMode(b.dataset.mode); });
+$("listBackBtn").addEventListener("click", () => setListHub(true));
+/** From "Ma collection": open the session and scroll to (and unfold) that card. */
+function openCardInSession(s, key) {
+  switchSession(s); setListMode("session");
+  const target = items.find((x) => colKey(x) === key); if (!target) return;
+  if (!visibleItems(listSource()).includes(target)) {
+    query = ""; $("listSearch").value = ""; filter = "all"; $("listFilter").value = "all";
+    if (listGame !== "all" && gameOf(target) !== listGame) listGame = "all";
+  }
+  const idx = visibleItems(listSource()).indexOf(target);
+  if (idx >= showMax) showMax = Math.ceil((idx + 1) / PAGE) * PAGE;
+  openId = target.id; renderList();
+  const row = $("list").querySelector(`[data-id="${CSS.escape(target.id)}"]`);
+  if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 1600); }
+}
 
 /* ----- grouped actions ----- */
 $("selectBtn").addEventListener("click", () => { selecting = !selecting; selected.clear(); openId = null; renderList(); });
@@ -2247,7 +2275,7 @@ function showView(v) {
   if (v === "photos") renderPhotos();
   if (v === "scan" && wantScan && !scanning) startCamera();
   if (v === "home") renderHome();
-  fitText(); if (v === "list") growTitle();
+  fitText(); if (v === "list") { setListHub(true); growTitle(); }
 }
 $("tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (b) showView(b.dataset.view); });
 $("view-home").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) showView(b.dataset.go); });

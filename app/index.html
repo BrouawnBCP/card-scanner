@@ -218,10 +218,26 @@
 
   <!-- ===== Liste ===== -->
   <section id="view-list" class="view" hidden>
-    <div class="segmented" id="listMode" role="tablist">
-      <button class="seg on" data-mode="session">Session</button>
-      <button class="seg" data-mode="history">Historique</button>
-      <button class="seg" data-mode="collection">Collection</button>
+    <div class="list-hub" id="listHub">
+      <button class="tile hub-tile" data-mode="session" type="button">
+        <span class="tile-ico"><svg class="ico"><use href="#i-stack"/></svg></span>
+        <span class="tile-txt"><strong>Sessions</strong><span id="hubSessionSub">Session en cours</span></span>
+        <svg class="ico chev"><use href="#i-chev"/></svg>
+      </button>
+      <button class="tile hub-tile" data-mode="collection" type="button">
+        <span class="tile-ico"><svg class="ico"><use href="#i-card"/></svg></span>
+        <span class="tile-txt"><strong>Ma Collection</strong><span id="hubCollSub">Toutes tes cartes</span></span>
+        <svg class="ico chev"><use href="#i-chev"/></svg>
+      </button>
+      <button class="tile hub-tile" data-mode="history" type="button">
+        <span class="tile-ico"><svg class="ico"><use href="#i-clock"/></svg></span>
+        <span class="tile-txt"><strong>Historique</strong><span id="hubHistSub">Toutes tes sessions</span></span>
+        <svg class="ico chev"><use href="#i-chev"/></svg>
+      </button>
+    </div>
+    <div class="list-back" id="listBack">
+      <button class="btn small" id="listBackBtn" type="button" aria-label="Retour aux listes"><svg class="ico sm back-chev"><use href="#i-chev"/></svg> Listes</button>
+      <span class="list-back-title" id="listModeName">Session</span>
     </div>
     <div class="segmented list-games" id="listGames" role="tablist" aria-label="Jeu affiché">
       <button class="seg on" data-lgame="all" type="button">Tous</button>

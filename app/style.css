@@ -580,3 +580,19 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 #view-scan .debug canvas{max-height:72px;width:auto;max-width:100%;align-self:flex-start}
 #view-scan .debug pre{font-size:10.5px;line-height:1.35;color:#dfe8ff}
 #view-scan .debug .muted{font-size:10px}
+
+/* ----- page "Liste" : 3 grands boutons (Sessions / Ma Collection / Historique) ----- */
+#view-list.hub>:not(#listHub){display:none!important}
+#view-list:not(.hub)>#listHub{display:none}
+.list-hub{display:flex;flex-direction:column;gap:14px;min-height:calc(100dvh - 110px - env(safe-area-inset-bottom,0px));padding:8px 0 16px}
+.hub-tile{flex:1;min-height:120px;padding:22px}
+.hub-tile .tile-ico{width:64px;height:64px;border-radius:18px}
+.hub-tile .tile-ico .ico{width:32px;height:32px}
+.hub-tile .tile-txt strong{font-size:22px}
+.hub-tile .tile-txt span{font-size:14px}
+.hub-tile:active{transform:scale(.98)}
+.list-back{display:flex;align-items:center;gap:10px}
+.list-back-title{font:700 17px var(--f-body)}
+.back-chev{transform:rotate(180deg)}
+.item.flash{animation:itemFlash 1.6s ease}
+@keyframes itemFlash{0%,40%{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}100%{box-shadow:0 0 0 0 transparent}}
