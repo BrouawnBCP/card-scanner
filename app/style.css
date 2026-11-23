@@ -239,11 +239,12 @@ input::placeholder{color:var(--faint)}
 .title-box{flex:1;min-width:0;display:flex;align-items:center;gap:4px}
 .icon-btn.sm{width:36px;min-width:36px;height:36px;min-height:36px}
 .icon-btn.sm .ico{width:17px;height:17px}
-#selectBtn,#addSealedBtn{flex:none}
+#selectBtn,#addSealedBtn,#addSinglesBtn{flex:none}
 /* the session name takes the whole line; its buttons go under it, on the right */
 .list-head{flex-wrap:wrap}
 .list-head .title-box:not([hidden]){flex:1 1 100%}
-.list-head #addSealedBtn{margin-left:auto}
+.list-head #addSinglesBtn{margin-left:auto}
+.sug .sug-price{flex:none;font-weight:600;color:var(--gold)}
 .selecting #selectBtn{background:var(--gold);color:var(--gold-ink);border-color:var(--gold)}
 .session-dates{margin:-6px 0 0}
 /* Cardmarket / eBay logo buttons: white tiles so the brand colours read on the dark theme */

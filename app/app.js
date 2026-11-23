@@ -1,5 +1,5 @@
 /* Card Scanner — reconnaissance du code de set sur le téléphone (PaddleOCR + ONNX Runtime), sans serveur. */
-const APP_VERSION = "68";
+const APP_VERSION = "69";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -2712,6 +2712,142 @@ $("bulkBody").addEventListener("click", (e) => {
   const it = makeSealed(b.dataset.sg, Number(b.dataset.sealed));
   closeBulk();
   if (listMode === "history") setListMode("session");
+  commit(it, "manual");
+  openId = lastAdded?.id || null; renderList();
+});
+/* "+ Singles" in the list: add a card by hand, without scanning (set code or name, any game). It goes to the
+   current session and its detail panel opens, to set language, condition, price, Cardmarket comment… */
+const SINGLE_GAMES = ["ygo", "pk", "op", "rb"];
+let singleGame = "ygo", singleT, singleHits = [], singleGroups = [];
+const singleIdx = {};
+/** Per game: names grouped (same name = one result) and every version of each card. */
+function singleIndex(g) {
+  if (singleIdx[g]) return singleIdx[g];
+  const D = dataFor(g); if (!D) return null;
+  const groups = new Map(), prints = new Map(), seen = new Set();
+  D.cards.forEach((c, i) => {
+    const k = fold(c[1] || c[0]) + "|" + fold(c[0]);
+    let gr = groups.get(k); if (!gr) groups.set(k, (gr = { fr: fold(c[1]), en: fold(c[0]), cards: [] }));
+    gr.cards.push(i);
+  });
+  const keys = Object.keys(D.prints);
+  if (g === "pk") keys.sort((a, b) => b.includes("-") - a.includes("-")); // "PBL-071" before "21/149"
+  for (const key of keys) for (const e of D.prints[key]) {
+    const id = `${e[0]}|${e[1]}|${e[2]}|${e[3]}`; if (seen.has(id)) continue; seen.add(id);
+    if (!prints.has(e[0])) prints.set(e[0], []);
+    prints.get(e[0]).push({ key, card: e[0], set: D.sets[e[1]], rarity: e[2], cm: e[3] || 0 });
+  }
+  return (singleIdx[g] = { groups: [...groups.values()], prints });
+}
+/** Code printed on the card, from a database key. */
+function singleCode(g, key) {
+  const [pre, num] = key.split("-");
+  if (g === "ygo") return `${pre}-${REGION_OF[settings.lang] || "FR"}${num}`;
+  if (g === "pk") { if (num) return `${pre} ${num}`; const [n, t] = key.split("/"); return `${n.padStart(t.length, "0")}/${t}`; }
+  if (g === "rb") return `${pre}-${(num || "").toLowerCase().replace(/^(sp|r|t)/, (x) => x.toUpperCase())}`;
+  return key;
+}
+const singleImg = (g, card) => {
+  const D = dataFor(g), f = D?.cards[card]?.[2]; if (!f) return "";
+  const src = g === "ygo" ? `img/${f}.webp` : GAMES[g].img(D.img + f);
+  return `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`;
+};
+function singleShow(html) { const box = $("singleSuggest"); if (box) { box.innerHTML = html; box.hidden = !html; } }
+function singleVersions(hits, head) {
+  singleHits = hits.slice(0, 150);
+  const D = dataFor(singleGame);
+  singleShow(head + (singleHits.length ? singleHits.map((h, i) => {
+    const p = cmPrice(h.cm), nm = D.cards[h.card];
+    return `<button type="button" class="sug" data-single="${i}"><span class="thumb sm">${singleImg(singleGame, h.card)}</span>
+      <span class="row-text"><span class="name">${esc(nm[1] || nm[0])}</span><span class="meta"><span class="code">${esc(singleCode(singleGame, h.key))}</span> · ${esc(h.set)}</span><span class="meta">${rarBadge(h.rarity)} ${esc(h.rarity)}</span></span>
+      ${p ? `<span class="sug-price">${esc(pricePlain(p))}</span>` : ""}</button>`;
+  }).join("") + (hits.length > singleHits.length ? `<p class="muted small sug-empty">${hits.length - singleHits.length} autres versions : précise avec le code d'extension.</p>` : "")
+    : `<p class="muted small sug-empty">Aucune version trouvée.</p>`));
+}
+/** Versions of one name (all cards bearing it), newest sets last as in the database. */
+function singleGroup(i) {
+  const gr = singleGroups[i], S = singleIndex(singleGame); if (!gr || !S) return;
+  const D = dataFor(singleGame), nm = D.cards[gr.cards[0]];
+  const hits = gr.cards.flatMap((c) => S.prints.get(c) || []).sort((a, b) => a.set.localeCompare(b.set, "fr") || a.key.localeCompare(b.key));
+  singleVersions(hits, `<p class="sug-head"><button type="button" class="link-btn" data-sback="1">← Retour</button><strong>${esc(nm[1] || nm[0])}</strong> · choisis la version</p>`);
+}
+/** Versions matching a set code: exact code first, otherwise every code starting with what was typed. */
+function singleByCode(q) {
+  const g = singleGame, D = dataFor(g), S = singleIndex(g), prev = game;
+  let m = null; game = g;
+  // Yu-Gi-Oh "MP20-FR16" is still being typed: list MP20-FR160…169 rather than MP20-FR016
+  if (g !== "ygo" || /\d{3}\s*$/.test(q)) try { m = matchManual(q); } catch { m = null; } finally { game = prev; }
+  game = prev;
+  if (m && D.prints[m.key]) return candidatesFor(m.key, g).map((c) => ({ ...c, key: m.key }));
+  const norm = (s) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const n = norm(q), n2 = g === "ygo" ? norm(q.replace(/^([A-Z0-9]{2,5})[- ]?(FR|EN|DE|IT|SP|PT)(?=\d)/i, "$1")) : n;
+  if (n.length < 3) return [];
+  const keys = Object.keys(D.prints).filter((k) => { const x = norm(k); return x.startsWith(n) || x.startsWith(n2); }).sort().slice(0, 40);
+  return keys.flatMap((key) => candidatesFor(key, g).map((c) => ({ ...c, key })));
+}
+async function singleSearch() {
+  const q = ($("singleQuery")?.value || "").trim(), g = singleGame;
+  if (!q) return singleShow("");
+  if (!dataFor(g)) { singleShow(`<p class="muted small sug-empty">Chargement de la base ${esc(GAME_NAME[g])}…</p>`); await (g === "ygo" ? null : ensureGame(g)); if (g !== singleGame || !dataFor(g)) return; }
+  const S = singleIndex(g); if (!S) return;
+  if (/\d/.test(q)) {
+    const hits = singleByCode(q);
+    if (hits.length) return singleVersions(hits, "");
+  }
+  const f = fold(q); if (f.length < 2) return singleShow("");
+  const starts = [], inside = [];
+  for (const gr of S.groups) {
+    if (gr.fr.startsWith(f) || gr.en.startsWith(f)) starts.push(gr);
+    else if (f.length >= 3 && (gr.fr.includes(f) || gr.en.includes(f))) inside.push(gr);
+  }
+  const score = (n) => (n.fr === f || n.en === f ? -1000 : 0) + Math.min(n.fr.length || 999, n.en.length);
+  starts.sort((a, b) => score(a) - score(b)); inside.sort((a, b) => score(a) - score(b));
+  singleGroups = [...starts, ...inside].slice(0, 12);
+  if (singleGroups.length === 1) return singleGroup(0);
+  const D = dataFor(g);
+  singleShow(singleGroups.length ? singleGroups.map((gr, i) => {
+    const [en, fr] = D.cards[gr.cards[0]], nv = gr.cards.reduce((s, c) => s + (S.prints.get(c) || []).length, 0);
+    return `<button type="button" class="sug" data-sgroup="${i}"><span class="thumb sm">${singleImg(g, gr.cards[0])}</span>
+      <span class="row-text"><span class="name">${esc(fr || en)}</span>${fr && fr !== en ? `<span class="meta">${esc(en)}</span>` : ""}</span>
+      <span class="muted small">${nv} version${nv > 1 ? "s" : ""}</span></button>`;
+  }).join("") : `<p class="muted small sug-empty">Aucune carte trouvée pour « ${esc(q)} ».</p>`);
+}
+const SINGLE_PH = { ygo: "Ex. MP20-FR167 ou Galant Granite", pk: "Ex. PBL 071, 21/149 ou Pikachu", op: "Ex. OP05-119 ou Luffy", rb: "Ex. VEN-136 ou Jinx" };
+function openSinglesSheet() {
+  singleGame = SINGLE_GAMES.includes(listGame) ? listGame : SINGLE_GAMES.includes(game) ? game : "ygo";
+  openBulk("Ajouter des cartes à l'unité", `
+    <div class="segmented" id="singleGames" role="tablist">${SINGLE_GAMES.map((g) => `<button type="button" class="seg ${g === singleGame ? "on" : ""}" data-singlegame="${g}">${GAME_NAME[g]}</button>`).join("")}</div>
+    <form class="manual" id="singleForm" autocomplete="off"><input id="singleQuery" type="search" placeholder="${esc(SINGLE_PH[singleGame])}" aria-label="Code d'extension ou nom de la carte" autocapitalize="off" spellcheck="false"></form>
+    <p class="muted small">Ajoutée à la session « ${esc(current.name)} ». Tu règles ensuite langue, état, prix et commentaire.</p>
+    <div class="suggest" id="singleSuggest" hidden></div>`);
+  if (singleGame !== "ygo") ensureGame(singleGame);
+  setTimeout(() => $("singleQuery")?.focus(), 50);
+}
+$("addSinglesBtn").addEventListener("click", openSinglesSheet);
+$("bulkBody").addEventListener("input", (e) => {
+  if (e.target.id !== "singleQuery") return;
+  clearTimeout(singleT); singleT = setTimeout(singleSearch, 150);
+});
+$("bulkBody").addEventListener("submit", (e) => { if (e.target.id === "singleForm") { e.preventDefault(); clearTimeout(singleT); singleSearch(); $("singleQuery").blur(); } });
+$("bulkBody").addEventListener("click", (e) => {
+  const sg = e.target.closest("[data-singlegame]");
+  if (sg) {
+    singleGame = sg.dataset.singlegame;
+    $("singleGames").querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b === sg));
+    $("singleQuery").placeholder = SINGLE_PH[singleGame];
+    if (singleGame !== "ygo") ensureGame(singleGame);
+    singleSearch(); return;
+  }
+  if (e.target.closest("[data-sback]")) return singleSearch();
+  const gb = e.target.closest("[data-sgroup]"); if (gb) return singleGroup(Number(gb.dataset.sgroup));
+  const b = e.target.closest("[data-single]"); if (!b) return;
+  const h = singleHits[Number(b.dataset.single)], g = singleGame; if (!h) return;
+  const it = makeItem({ key: h.key, code: singleCode(g, h.key), region: g === "ygo" ? REGION_OF[settings.lang] || "FR" : "", game: g });
+  const c = it.cands.find((x) => x.card === h.card && x.rarity === h.rarity && x.cm === h.cm) || it.cands.find((x) => x.card === h.card && x.rarity === h.rarity);
+  if (c) applyCandidate(it, c);
+  closeBulk();
+  if (listMode !== "session") setListMode("session");
+  if (listGame !== "all" && listGame !== g) listGame = "all";
   commit(it, "manual");
   openId = lastAdded?.id || null; renderList();
 });
