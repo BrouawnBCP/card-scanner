@@ -72,9 +72,17 @@ let idbBroken = false, persistT = null;
 function saveItems() {
   current.items = items; current.updatedAt = Date.now();
   persist();
-  renderList(); renderSessionBar();
+  // the list is only redrawn when it is on screen (a big "Ma collection" is slow to build)
+  if (!$("view-list").hidden) renderList(); else updateTabCount();
+  renderSessionBar();
   scheduleSync();
 }
+/** Save a session that may not be the current one (product page, photos). */
+function saveSession(s) {
+  if (s === current) { saveItems(); return; }
+  s.updatedAt = Date.now(); persist(); renderSessionBar(); scheduleSync();
+}
+function updateTabCount() { const n = items.reduce((t, x) => t + x.qty, 0); $("tabCount").textContent = n; $("tabCount").classList.toggle("zero", !n); }
 function persist() {
   store.set("cs-current", current.id);
   if (idbBroken) { if (!store.set("cs-sessions", sessions)) toast("Impossible d'enregistrer sur ce téléphone. Exporte ta liste."); return; }
@@ -1754,7 +1762,7 @@ function renderList() {
           <span class="tags">${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}${stockTag(it)}${it.qty > 1 ? `<span class="tag qty">×${it.qty}</span>` : ""}${it.firstEd ? `<span class="tag ed">1re</span>` : ""}<span class="tag">${LANG_SHORT[it.lang] || ""}</span>${coll || isSealed(it) ? "" : `<span class="tag">${esc(it.condition)}</span>`}</span>
         </span>
       </button>
-      ${open ? (coll ? collDetail(it) : editPanel(it)) : ""}
+      ${open && !coll ? editPanel(it) : ""}
     </div>`;
   }).join("");
 }
@@ -1808,22 +1816,14 @@ function stockLine(it) {
   const s = stockOf(it);
   return s ? `<p class="stock-line full">${ico("stack")} Déjà <strong>${s.n}</strong> dans ton stock Cardmarket${s.lang && s.lang !== s.n ? `, dont ${s.lang} en ${LANG_SHORT[it.lang] || ""}` : ""}.</p>` : "";
 }
-function collDetail(it) {
-  return `<div class="edit coll">
-    ${stockLine(it)}
-    <p class="full muted small">Présente dans ${it.sessionsIn.length} session${it.sessionsIn.length > 1 ? "s" : ""} :</p>
-    ${it.sessionsIn.map(({ s, qty }) => `<button class="sess-link full" data-act="opensession" data-sid="${s.id}"><span>${esc(s.name)}</span><span class="tag qty">×${qty}</span>${ico("chev")}</button>`).join("")}
-    <div class="edit-row">${marketLinks(it)}</div>
-  </div>`;
-}
 const itemOf = (el) => items.find((x) => x.id === el.closest("[data-id]")?.dataset.id);
 $("list").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const a = b.dataset.act, rowId = b.closest("[data-id]")?.dataset.id;
+  if (a === "toggle" && listMode === "collection") { openCardPage(rowId); return; }
   if (a === "toggle") { openId = openId === rowId ? null : rowId; renderList(); return; }
   if (a === "pick") { selected.has(rowId) ? selected.delete(rowId) : selected.add(rowId); renderList(); return; }
   if (a === "photo") { openViewer(photoCache.findIndex((p) => p.id === b.dataset.photo)); return; }
-  if (a === "opensession") { const s = sessions.find((x) => x.id === b.dataset.sid); if (s) { openCardInSession(s, rowId.slice(4)); toast(`Session « ${s.name} » ouverte`); } return; }
   const it = itemOf(b); if (!it) return;
   if (a === "ownphoto") { pickOwnPhoto(it); return; }
   if (a === "plus") it.qty += 1;
@@ -1867,8 +1867,9 @@ $("listHub").addEventListener("click", (e) => { const b = e.target.closest("[dat
 $("listBackBtn").addEventListener("click", () => setListHub(true));
 /** From "Ma collection": open the session and scroll to (and unfold) that card. */
 function openCardInSession(s, key) {
-  switchSession(s); setListMode("session");
-  const target = items.find((x) => colKey(x) === key); if (!target) return;
+  listMode = "session"; switchSession(s); setListMode("session");
+  const card = key.split("|").slice(0, 2).join("|");
+  const target = items.find((x) => colKey(x) === key) || items.find((x) => colKey(x).startsWith(card + "|")); if (!target) return;
   if (!visibleItems(listSource()).includes(target)) {
     query = ""; $("listSearch").value = ""; filter = "all"; $("listFilter").value = "all";
     if (listGame !== "all" && gameOf(target) !== listGame) listGame = "all";
@@ -1876,9 +1877,83 @@ function openCardInSession(s, key) {
   const idx = visibleItems(listSource()).indexOf(target);
   if (idx >= showMax) showMax = Math.ceil((idx + 1) / PAGE) * PAGE;
   openId = target.id; renderList();
-  const row = $("list").querySelector(`[data-id="${CSS.escape(target.id)}"]`);
-  if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 1600); }
+  const row = $("list").querySelector(`[data-id="${CSS.escape(target.id)}"]`); if (!row) return;
+  // on phones a scroll made in the same frame as the re-render can be lost: do it again once laid out
+  const go = () => { if (!row.isConnected) return; const r = row.getBoundingClientRect(); window.scrollTo(0, Math.max(0, window.scrollY + r.top - Math.max(80, (innerHeight - r.height) / 3))); };
+  go(); requestAnimationFrame(() => requestAnimationFrame(go)); setTimeout(go, 250);
+  row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 1600);
 }
+
+/* ----- product page (from "Ma collection"): one card on its own page, same edits as in a session ----- */
+let cardPg = null, collScroll = 0;
+function openCardPage(colId) {
+  const key = colId.slice(4);
+  const s = sessions.find((x) => x === current && x.items.some((y) => colKey(y) === key)) || sessions.find((x) => x.items.some((y) => colKey(y) === key));
+  if (!s) return;
+  collScroll = window.scrollY;
+  cardPg = { sid: s.id, id: s.items.find((y) => colKey(y) === key).id, key };
+  showView("card"); renderCardPage();
+}
+function cardCtx() { const s = sessions.find((x) => x.id === cardPg?.sid); return { s, it: s?.items.find((x) => x.id === cardPg.id) }; }
+function closeCardPage() {
+  cardPg = null; showView("list", true); renderList();
+  window.scrollTo(0, collScroll); requestAnimationFrame(() => window.scrollTo(0, collScroll));
+}
+function renderCardPage() {
+  const { s, it } = cardCtx();
+  if (!it) { closeCardPage(); return; }
+  cardPg.key = colKey(it);
+  const copies = sessions.map((x) => ({ s: x, it: x.items.find((y) => colKey(y) === cardPg.key) })).filter((x) => x.it);
+  const total = copies.reduce((n, x) => n + x.it.qty, 0);
+  $("cardPage").innerHTML = `
+    <div class="card-hero">
+      ${thumb(it, true)}
+      <div class="card-hero-txt">
+        <h1 class="card-name">${esc(it.nameFR)}</h1>
+        <span class="meta">${metaHtml(it)}</span>
+        ${it.nameEN && it.nameEN !== it.nameFR ? `<span class="muted small">${esc(it.nameEN)}</span>` : ""}
+        <span class="tags">${it.rarity ? `<span class="tag">${esc(it.rarity)}</span>` : `<span class="tag warn">Rareté à choisir</span>`}${gemPrice(it) ? `<span class="tag gem" title="Pépite">${ico("gem")}</span>` : ""}</span>
+      </div>
+      ${priceHtml(it)}
+    </div>
+    <p class="muted small card-count">${total} exemplaire${total > 1 ? "s" : ""} dans ta collection${copies.length > 1 ? `, réparti${total > 1 ? "s" : ""} dans ${copies.length} sessions` : ""}</p>
+    ${copies.length > 1 ? `<div class="chips card-sess">${copies.map((o) => `<button class="chip ${o.s === s ? "on" : ""}" data-act="csess" data-sid="${o.s.id}">${esc(o.s.name)} · ×${o.it.qty}</button>`).join("")}</div>` : ""}
+    <div class="item card-item ${it.rarity ? "" : "todo"}" data-id="${esc(it.id)}">${editPanel(it)}</div>
+    <button class="btn sess-link" data-act="opensession" type="button">${ico("stack")}<span>Session « ${esc(s.name)} »</span>${ico("chev")}</button>`;
+}
+/** Run an edit in the card's own session (it may not be the current one), then save it. */
+function cardEdit(fn) {
+  const { s, it } = cardCtx(); if (!it) return;
+  const cur = current; current = s; items = s.items;
+  try { fn(it); } finally { s.items = items; current = cur; items = cur.items; }
+  if (lastAdded && !items.some((x) => x.id === lastAdded.id)) lastAdded = null;
+  saveSession(s); renderLast(); renderCardPage();
+}
+$("cardPage").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b || !cardPg) return;
+  const a = b.dataset.act, { s, it } = cardCtx(); if (!it) return;
+  if (a === "csess") { const o = sessions.find((x) => x.id === b.dataset.sid), c = o?.items.find((y) => colKey(y) === cardPg.key); if (c) { cardPg.sid = o.id; cardPg.id = c.id; renderCardPage(); } return; }
+  if (a === "photo") { openViewer(photoCache.findIndex((p) => p.id === b.dataset.photo)); return; }
+  if (a === "ownphoto") { pickOwnPhoto(it, s); return; }
+  if (a === "opensession") { const key = colKey(it); cardPg = null; showView("list", true); openCardInSession(s, key); return; }
+  if (a === "del") { toast(`${it.nameFR} retirée`); cardEdit(() => { items = items.filter((x) => x !== it); }); return; }
+  cardEdit(() => {
+    if (a === "plus") it.qty += 1;
+    else if (a === "minus") { if (it.qty > 1) it.qty -= 1; }
+    else if (a === "ed") it.firstEd = !it.firstEd;
+  });
+});
+$("cardPage").addEventListener("change", (e) => {
+  const f = e.target.dataset.f; if (!f || !cardPg) return;
+  cardEdit((it) => {
+    if (f === "rarity") {
+      setRarity(it, e.target.value);
+      if (!items.includes(it)) { const twin = items.find((x) => mergeKey(x) === mergeKey(it)); if (twin) cardPg.id = twin.id; }
+    } else if (f === "price") it.price = e.target.value.trim().replace(",", ".");
+    else it[f] = e.target.value.trim();
+  });
+});
+$("cardBackBtn").addEventListener("click", closeCardPage);
 
 /* ----- grouped actions ----- */
 $("selectBtn").addEventListener("click", () => { selecting = !selecting; selected.clear(); openId = null; renderList(); });
@@ -2263,19 +2338,22 @@ $("clearBtn").addEventListener("click", () => {
   clearArmed = 0; deleteSession(current); $("clearBtn").innerHTML = idle; toast("Session supprimée");
 });
 /* ----- pages: auth → home → scanner / lists / settings ----- */
-const VIEWS = ["auth", "home", "scan", "list", "settings", "photos"];
+const VIEWS = ["auth", "home", "scan", "list", "settings", "photos", "card"];
 let view = null;
-function showView(v) {
+/** keepList: back to the list as it was (from a product page), not to the 3-button "Liste" page. */
+function showView(v, keepList = false) {
   view = v;
+  if (v !== "card") cardPg = null;
   for (const n of VIEWS) $("view-" + n).hidden = v !== n;
   $("tabs").hidden = v === "auth";
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.view === v));
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.view === (v === "card" ? "list" : v)));
   window.scrollTo(0, 0);
   if (v !== "scan" && (scanning || (camMode === "photo" && liveTrack()))) pauseScan();
   if (v === "photos") renderPhotos();
   if (v === "scan" && wantScan && !scanning) startCamera();
   if (v === "home") renderHome();
-  fitText(); if (v === "list") { setListHub(true); growTitle(); }
+  if (v === "list") { if (keepList) setListHub(false); else setListHub(true); growTitle(); }
+  fitText();
 }
 $("tabs").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (b) showView(b.dataset.view); });
 $("view-home").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) showView(b.dataset.go); });
@@ -2370,21 +2448,21 @@ function capturePhoto(r = guideInVideo()) {
   return full;
 }
 /** Store the picture and link it to the card line it was taken for. */
-async function attachPhoto(full, it, itemId) {
+async function attachPhoto(full, it, itemId, sess = current) {
   try {
     const thumbC = grab(full, 0, 0, full.width, full.height, 360);
     const p = { id: uid(), createdAt: Date.now(), w: full.width, h: full.height, blob: await toBlob(full, 0.92), thumb: await toBlob(thumbC, 0.8),
-      code: it.code, name: it.nameFR || it.nameEN || "", key: it.key, itemId: itemId || "", sessionId: current.id };
+      code: it.code, name: it.nameFR || it.nameEN || "", key: it.key, itemId: itemId || "", sessionId: sess.id };
     await idb.putPhoto(p);
     photoCache = [p, ...(photoCache || [])]; updatePhotoBadge(); bump($("galleryBtn"));
-    const line = items.find((x) => x.id === itemId);
-    if (line) { line.photos = [...(line.photos || []), p.id]; saveItems(); renderLast(); }
+    const line = sess.items.find((x) => x.id === itemId);
+    if (line) { line.photos = [...(line.photos || []), p.id]; saveSession(sess); renderLast(); }
     if (view === "photos") renderPhotos();
   } catch (e) { console.warn(e); toast("Photo non enregistrée (mémoire du téléphone pleine ?)"); }
 }
 $("galleryBtn").addEventListener("click", () => showView("photos"));
 /** Own picture of a sealed product (camera or gallery): stored on this phone, shown first in the list. */
-function pickOwnPhoto(it) {
+function pickOwnPhoto(it, sess = current) {
   const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
   inp.addEventListener("change", async () => {
     const f = inp.files?.[0]; if (!f) return;
@@ -2392,9 +2470,10 @@ function pickOwnPhoto(it) {
       const bmp = await createImageBitmap(f, { imageOrientation: "from-image" });
       const full = grab(bmp, 0, 0, bmp.width, bmp.height, 1600); bmp.close?.();
       const before = it.photos || [];
-      await attachPhoto(full, it, it.id);
-      const line = items.find((x) => x.id === it.id);
-      if (line?.photos?.length > before.length) { const id = line.photos[line.photos.length - 1]; line.photos = [id, ...before]; saveItems(); renderLast(); }
+      await attachPhoto(full, it, it.id, sess);
+      const line = sess.items.find((x) => x.id === it.id);
+      if (line?.photos?.length > before.length) { const id = line.photos[line.photos.length - 1]; line.photos = [id, ...before]; saveSession(sess); renderLast(); }
+      if (cardPg) renderCardPage();
       toast("Photo ajoutée");
     } catch (e) { console.warn(e); toast("Cette image n'a pas pu être lue"); }
   });

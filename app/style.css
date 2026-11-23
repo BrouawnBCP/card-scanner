@@ -596,3 +596,14 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 .back-chev{transform:rotate(180deg)}
 .item.flash{animation:itemFlash 1.6s ease}
 @keyframes itemFlash{0%,40%{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}100%{box-shadow:0 0 0 0 transparent}}
+
+/* ----- page d'un produit (depuis Ma collection) ----- */
+.card-page{display:flex;flex-direction:column;gap:12px;padding-bottom:16px}
+.card-hero{display:flex;gap:14px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px}
+.card-hero .thumb.lg{width:96px;height:140px;border-radius:8px;flex:none}
+.card-hero-txt{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1}
+.card-name{margin:0;font-size:20px;line-height:1.2}
+.card-hero .tags{display:flex;flex-wrap:wrap;gap:4px}
+.card-count{margin:0}
+.card-sess{display:flex;flex-wrap:wrap;gap:6px}
+.card-item .edit{border-top:0}
