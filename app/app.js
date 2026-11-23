@@ -1321,10 +1321,21 @@ function setRarity(it, rarity) {
   if (twin) { twin.qty += it.qty; items = items.filter((x) => x !== it); if (lastAdded?.id === it.id) lastAdded = { id: twin.id, merged: true }; }
 }
 /** eBay France search on the printed set code (MP20-FR167): finds that exact print and language. */
-const ebayLink = (it) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""} ${LANG_WORD[it.lang] || ""}`.trim() : gameOf(it) === "pk" ? `Pokemon ${(it.lang === "English" ? it.nameEN : it.nameFR) || it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "")}`;
+const ebayQuery = (it) => gameOf(it) === "rb" ? `Riftbound ${it.nameEN || ""}` : gameOf(it) === "op" ? `One Piece ${it.code || ""} ${LANG_WORD[it.lang] || ""}`.trim() : gameOf(it) === "pk" ? `Pokemon ${(it.lang === "English" ? it.nameEN : it.nameFR) || it.nameEN || ""} ${it.code || ""}` : it.code || it.nameEN || "";
+const ebayLink = (it, extra = "") => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent((ebayQuery(it) + " " + extra).trim())}`;
+/** Graded copies on eBay: the same search + "PSA 10", "BGS 9.5"… (chosen in a small sheet). */
+const GRADERS = { psa: { label: "PSA", word: "PSA", grades: ["10", "9", "8", "7", "6", "5"] }, bgs: { label: "Beckett", word: "BGS", grades: ["10", "9.5", "9", "8.5", "8", "7"] } };
+const gradedBtns = (it) => Object.entries(GRADERS).map(([k, g]) => `<button type="button" class="brand-btn grade-btn ${k}" data-grader="${k}" data-q="${esc(ebayQuery(it))}" aria-label="Rechercher les cartes gradées ${g.label} sur eBay" title="Gradées ${g.label} sur eBay">${k === "psa" ? "PSA" : "BGS"}</button>`).join("");
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.("[data-grader]"); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const g = GRADERS[b.dataset.grader], q = b.dataset.q, url = (x) => `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(`${q} ${x}`.trim())}`;
+  openBulk(`${g.label} sur eBay`, `<p class="muted small">${esc(q)}</p><div class="chips big">${g.grades.map((n) => `<a class="chip" href="${url(`${g.word} ${n}`)}" target="_blank" rel="noopener">${g.word} ${n}</a>`).join("")}<a class="chip" href="${url(g.word)}" target="_blank" rel="noopener">Toutes notes</a></div>`);
+}, true);
 /** Cardmarket and eBay logo buttons. */
 const marketLinks = (it) => `<a class="brand-btn" href="${cmLink(it)}" target="_blank" rel="noopener" aria-label="Voir sur Cardmarket (${LANG_SHORT[it.lang] || "FR"})" title="Voir sur Cardmarket"><img src="icons/brands/cardmarket.png" alt="" width="22" height="22"><span class="brand-lang">${LANG_SHORT[it.lang] || ""}</span></a>`
   + `<a class="brand-btn" href="${ebayLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.code)} sur eBay" title="Rechercher sur eBay"><svg class="ebay-logo" viewBox="0 0 60 24" aria-hidden="true"><use href="#logo-ebay"/></svg></a>`
+  + gradedBtns(it)
   + `<a class="brand-btn vinted" href="${vintedLink(it)}" target="_blank" rel="noopener" aria-label="Rechercher ${esc(it.nameFR || it.nameEN)} sur Vinted" title="Rechercher sur Vinted"><img src="icons/brands/vinted.png" alt="" width="24" height="24"></a>`;
 /** Vinted France search on the card's name (sellers rarely write the set code there). */
 /** One Piece: the card's language is added to the eBay and Vinted searches ("Français", "English"…). */

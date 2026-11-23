@@ -244,6 +244,10 @@ input::placeholder{color:var(--faint)}
 .brand-lang{font:800 11px var(--f-mono);color:#1b3a8a}
 .ebay-logo{width:46px;height:20px;display:block}
 .brand-btn.vinted{min-width:44px;padding:0 8px}
+.grade-btn{min-width:44px;padding:0 8px;font:800 13px var(--f-mono);letter-spacing:.5px;cursor:pointer}
+.grade-btn.psa{color:#c8102e}
+.grade-btn.bgs{color:#1d1d1b}
+#bulkBody a.chip{text-decoration:none}
 .brand-btn.vinted img{width:24px;height:24px;border-radius:6px}
 .scanned{margin:0}
 /* history */
@@ -502,6 +506,7 @@ textarea.title-input{display:block;width:100%;resize:none;overflow:hidden;color:
 #view-scan .last .actions .brand-btn{height:32px;min-width:40px;padding:0 6px;flex:none}
 #view-scan .last .actions .brand-btn img{width:18px;height:18px}
 #view-scan .last .actions .ebay-logo{width:38px}
+#view-scan .last .grade-btn{display:none}
 #view-scan .last .chips .chip{min-height:32px;padding:6px 10px}
 /* scanning help: shown inside the camera area, at the top, instead of pushing the page down */
 #view-scan .scan-hint{position:absolute;left:10px;right:10px;top:50px;z-index:3;padding:8px 10px;gap:8px;background:rgba(36,22,6,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
